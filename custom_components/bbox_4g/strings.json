@@ -1,0 +1,126 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to the Bbox router",
+        "description": "Enter the address of your router and its administration credentials. The password is stored by Home Assistant and never appears in a configuration file.",
+        "data": {
+          "host": "Router address",
+          "username": "Administrator username",
+          "password": "Administrator password",
+          "family": "Router type",
+          "use_tls": "Use HTTPS",
+          "verify_ssl": "Verify the TLS certificate"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Password required",
+        "description": "The router rejected the connection. Please enter the administration password again.",
+        "data": {
+          "password": "Administrator password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to reach the router at this address.",
+      "invalid_auth": "The router rejected the username or password.",
+      "unknown": "Unexpected error.",
+      "already_connected": "An administration session is already open on the router (web interface or another instance). Close it, or wait a few minutes, then try again."
+    },
+    "abort": {
+      "already_configured": "This router is already configured.",
+      "reauth_successful": "Password updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bbox options",
+        "description": "Integration settings.",
+        "data": {
+          "scan_interval": "Polling interval (seconds)",
+          "block_scope": "Scope of the device blocking",
+          "write_dashboard": "Write the dashboards to /config/lovelace"
+        }
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Refresh",
+      "description": "Re-reads the state of the router."
+    },
+    "block_device": {
+      "name": "Block a device",
+      "description": "Blocks a device on the router network.",
+      "fields": {
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device to block."
+        }
+      }
+    },
+    "unblock_device": {
+      "name": "Unblock a device",
+      "description": "Releases a blocked device.",
+      "fields": {
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device to release."
+        }
+      }
+    },
+    "set_wifi": {
+      "name": "Toggle Wi-Fi",
+      "description": "Turns the router Wi-Fi on or off.",
+      "fields": {
+        "band": {
+          "name": "Band",
+          "description": "“all”, “24” or “5”."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "true to turn on, false to turn off."
+        }
+      }
+    },
+    "wake_device": {
+      "name": "Wake a device",
+      "description": "Sends a magic packet (Wake-on-LAN) to power the device on.",
+      "fields": {
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device to wake."
+        }
+      }
+    },
+    "set_internet_access": {
+      "name": "Cut Internet access of a device",
+      "description": "Cuts (or restores) the Internet output of a device, Wi-Fi or wired. The device keeps its IP address and stays reachable on the local network.",
+      "fields": {
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device concerned."
+        },
+        "allowed": {
+          "name": "Access allowed",
+          "description": "false to cut Internet access, true to restore it."
+        }
+      }
+    },
+    "set_wifi_access": {
+      "name": "Allow or deny Wi-Fi of a device",
+      "description": "Adds the device to the black list of its Wi-Fi network (it is disconnected), or removes it.",
+      "fields": {
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device concerned."
+        },
+        "allowed": {
+          "name": "Access allowed",
+          "description": "false to disconnect from Wi-Fi, true to reconnect."
+        }
+      }
+    }
+  }
+}

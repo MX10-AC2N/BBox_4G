@@ -1,0 +1,13 @@
+{
+  "domain": "bbox_4g",
+  "name": "Bbox Bouygues",
+  "codeowners": ["@MX10-AC2N"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/MX10-AC2N/BBox_4G",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/MX10-AC2N/BBox_4G/issues",
+  "requirements": [],
+  "version": "2.0.0"
+}
