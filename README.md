@@ -1,60 +1,65 @@
-# Bbox 4G Bouygues pour Home Assistant  ![Statut du workflow Validate](https://github.com/MX10-AC2N/BBox_4G/actions/workflows/validate.yml/badge.svg)
+# Bbox 4G Bouygues for Home Assistant
 
-Intégration personnalisée (HACS) pour les box Bouygues Telecom : voir **qui est connecté**,
-**couper le Wi-Fi** et **bloquer un appareil**, en local, sans cloud ni dépendance Python.
+🇫🇷 [Version française](README_french.md)
 
-> ⚠️ **État du projet** : développé et testé sur une **Huawei B528s (Bbox 4G)**.
-> Le support des Bbox Sagemcom (fibre/ADSL) est présent dans le code mais **non testé** sur du matériel réel.
-> Le blocage par filtre MAC modifie la configuration du routeur : essayez d'abord sur un appareil sans importance.
+[![Validate](https://github.com/MX10-AC2N/BBox_4G/actions/workflows/validate.yml/badge.svg)](https://github.com/MX10-AC2N/BBox_4G/actions/workflows/validate.yml)
+
+Custom integration (HACS) for **Bouygues Telecom routers**: see **who is connected**,
+**switch Wi-Fi on/off** and **block a device**, all locally — no cloud, no extra Python dependency.
+
+> ⚠️ **Project status**: developed and tested on a **Huawei B528s (Bbox 4G)**.
+> Support for Sagemcom Bbox routers (fibre/ADSL) is present in the code but **not validated on real hardware**.
+> MAC-filter blocking changes the router configuration: try it first on a device you don't care about.
 
 ## Installation (HACS)
 
-1. HACS → menu ⋮ → **Dépôts personnalisés**
-2. URL : `https://github.com/MX10-AC2N/BBox_4G` — catégorie **Intégration**
-3. Installer **Bbox Bouygues**, redémarrer Home Assistant
-4. **Paramètres → Appareils et services → Ajouter une intégration → Bbox Bouygues**
+1. HACS → ⋮ menu → **Custom repositories**
+2. URL: `https://github.com/MX10-AC2N/BBox_4G` — category **Integration**
+3. Install **Bbox Bouygues**, then restart Home Assistant
+4. **Settings → Devices & services → Add integration → Bbox Bouygues**
 
-| Champ | Valeur |
+| Field | Value |
 |---|---|
-| Adresse de la box | `192.168.8.1` (4G, souvent) ou `192.168.1.1` (5G) ; `192.168.1.254` (fibre) |
-| Identifiant | `admin` |
-| Mot de passe | mot de passe d'administration de la box (étiquette), pas celui du Wi-Fi |
+| Router address | `192.168.8.1` (4G, usually) or `192.168.1.1` (5G); `192.168.1.254` (fibre) |
+| Username | `admin` |
+| Password | the router **administration** password (printed on the label), not the Wi-Fi password |
 
-Utilisez l'**adresse IP** : `mabbox.bytel.fr` ne se résout pas toujours depuis un conteneur.
+Use the **IP address**: `mabbox.bytel.fr` often does not resolve from inside a container.
 
-## Entités
+## Entities
 
-**La box**
+**The router**
 
-| Entité | Rôle |
+| Entity | Purpose |
 |---|---|
-| `sensor.bbox_clients_connectes` / `sensor.bbox_appareils_connus` | nombre d'appareils connectés / connus |
-| `sensor.bbox_reseau_invite` | état du réseau invité |
-| `switch.bbox_wifi`, `…_24_ghz`, `…_5_ghz` | Wi-Fi global et par bande |
-| `button.bbox_actualiser`, `button.bbox_reconnecter` | forcer une lecture / rouvrir la session |
+| `sensor.bbox_clients_connectes` / `sensor.bbox_appareils_connus` | number of connected / known devices |
+| `sensor.bbox_reseau_invite` | guest network state |
+| `switch.bbox_wifi`, `…_24_ghz`, `…_5_ghz` | Wi-Fi (both bands / per band) |
+| `button.bbox_actualiser`, `button.bbox_reconnecter` | force a refresh / reopen the admin session |
 
-**Chaque appareil connu** est créé comme un appareil Home Assistant (identifié par sa MAC) :
+**Each known device** is created as a Home Assistant device (identified by its MAC address):
 
-| Entité | Rôle |
+| Entity | Purpose |
 |---|---|
-| `device_tracker.<appareil>_suivi` | présence (utilisable par *Personnes* et *Zones*) |
-| `binary_sensor.<appareil>_presence` | connecté / déconnecté |
-| `switch.<appareil>_acces_internet` | coupe la sortie Internet (filtre MAC) |
-| `switch.<appareil>_wifi` | autorise / refuse l'appareil sur le Wi-Fi (liste noire du SSID) |
-| `switch.<appareil>_connexion` | blocage selon la **portée** choisie dans les options |
-| `button.<appareil>_reveiller` | Wake-on-LAN |
+| `device_tracker.<device>_suivi` | presence (usable by *People* and *Zones*) |
+| `binary_sensor.<device>_presence` | connected / disconnected |
+| `switch.<device>_acces_internet` | cuts the device's Internet output (MAC filter) |
+| `switch.<device>_wifi` | allows / denies the device on Wi-Fi (SSID black list) |
+| `switch.<device>_connexion` | blocking according to the **scope** set in the options |
+| `button.<device>_reveiller` | Wake-on-LAN |
 
-Les entités d'un appareil disparu de la box pendant plusieurs lectures sont supprimées.
+> Entity names are currently in French (this is why IDs look like `…_acces_internet`).
+> Entities of a device that has disappeared from the router for several polls are removed automatically.
 
 ## Options
 
-*Paramètres → Appareils et services → Bbox Bouygues → Configurer*
+*Settings → Devices & services → Bbox Bouygues → Configure*
 
-| Option | Défaut | Rôle |
+| Option | Default | Purpose |
 |---|---|---|
-| Fréquence d'interrogation | 60 s | délai entre deux lectures (15–600 s) |
-| Portée du blocage | `lan` | `lan` filtre MAC · `wifi` liste noire du SSID · `internet` · `all` |
-| Écrire les tableaux de bord | non | génère des fichiers YAML Lovelace dans `/config/lovelace/` |
+| Polling interval | 60 s | delay between two reads of the router (15–600 s) |
+| Device blocking scope | `lan` | `lan` MAC filter · `wifi` SSID black list · `internet` · `all` |
+| Write the dashboards | off | generates Lovelace YAML files in `/config/lovelace/` |
 
 ## Services
 
@@ -73,36 +78,36 @@ data:
   mac: aa:bb:cc:dd:ee:ff
 ```
 
-## À savoir
+## Good to know
 
-- **Une seule session d'administration** : les box Huawei n'en acceptent qu'une. Si l'interface web de la box est ouverte, la connexion de Home Assistant peut être refusée (code `108003`) et inversement. Fermez l'interface web ou utilisez le bouton **Reconnecter**.
-- **Mot de passe refusé** : Home Assistant affiche une notification « Corriger » pour le ressaisir.
-- **Filtre MAC en liste blanche** : si la box est en politique « liste blanche » avec des appareils autorisés, l'intégration refuse de bloquer pour ne pas couper Internet à tous.
-- **Certificat TLS** : auto-signé, non vérifié par défaut (comportement habituel des box Bouygues).
+- **Single admin session**: Huawei routers accept only one administration session. If the router's web interface is open, Home Assistant's connection may be refused (code `108003`) and vice versa. Close the web interface or press the **Reconnect** button.
+- **Password rejected**: Home Assistant shows a "Fix" notification to re-enter it.
+- **MAC filter in allow-list mode**: if the router uses an allow-list ("white list") with authorised devices, the integration refuses to block so it does not cut Internet for everyone.
+- **TLS certificate**: self-signed and not verified by default (usual behaviour for Bouygues routers).
 
-## Tableaux de bord (optionnel)
+## Dashboards (optional)
 
-Avec l'option « Écrire les tableaux de bord », trois fichiers sont créés (`bbox.yaml` natif, `bbox-auto.yaml` avec *auto-entities*, `bbox-mushroom.yaml` avec *Mushroom*).
-Ajoutez-en un via **Paramètres → Tableaux de bord → Ajouter → Vue YAML**.
+With the "Write the dashboards" option, three files are created (`bbox.yaml` native, `bbox-auto.yaml` using *auto-entities*, `bbox-mushroom.yaml` using *Mushroom*).
+Add one with **Settings → Dashboards → Add dashboard → YAML view**.
 
-## Dépannage
+## Troubleshooting
 
-| Symptôme | Piste |
+| Symptom | Hint |
 |---|---|
-| « Impossible de joindre la box » | vérifier l'IP, que HA est sur le même réseau que la box, et qu'aucune session web n'est ouverte |
-| « Identifiants refusés » | mot de passe **admin** de la box ; la box verrouille le compte après plusieurs essais |
-| Entités « indisponibles » | fermer l'interface web de la box, puis **Reconnecter** |
-| Journaux | `docker logs homeassistant \| grep -i bbox` |
+| "Unable to reach the router" | check the IP, that Home Assistant is on the same network as the router, and that no web session is open |
+| "Credentials rejected" | use the router **admin** password; the router locks the account after several attempts |
+| Entities "unavailable" | close the router web interface, then press **Reconnect** |
+| Logs | `docker logs homeassistant \| grep -i bbox` |
 
-## Outil de diagnostic (facultatif)
+## Diagnostic tool (optional)
 
-`tools/bbox_cli.py` est un script indépendant (non utilisé par Home Assistant) pour tester la box depuis un terminal :
+`tools/bbox_cli.py` is a standalone script (not used by Home Assistant) to test the router from a terminal:
 
 ```bash
 python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' diag
 python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' host-table
 ```
 
-## Licence
+## License
 
-MIT — voir [LICENSE](LICENSE). Projet non affilié à Bouygues Telecom.
+MIT — see [LICENSE](LICENSE). Not affiliated with Bouygues Telecom.
