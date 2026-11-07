@@ -36,11 +36,12 @@
     "step": {
       "init": {
         "title": "Bbox options",
-        "description": "Integration settings.",
+        "description": "Integration settings.\n\n• under_box (default): all client entities are attached to the Bbox device.\n• separate: each client becomes its own Home Assistant device.\n\nYou can still make individual devices independent via the « Independent device » switch.\n\nDashboards: select one or more variants to create in the sidebar (refresh the page after saving).",
         "data": {
           "scan_interval": "Polling interval (seconds)",
           "block_scope": "Scope of the device blocking",
-          "write_dashboard": "Write the dashboards to /config/lovelace"
+          "device_mode": "Default device mode for clients",
+          "dashboards": "Dashboards to create in the sidebar"
         }
       }
     }
@@ -119,6 +120,16 @@
         "allowed": {
           "name": "Access allowed",
           "description": "false to disconnect from Wi-Fi, true to reconnect."
+        }
+      }
+    },
+    "create_dashboard": {
+      "name": "Create / update dashboards",
+      "description": "Creates the selected Bbox dashboards in the sidebar (storage mode).",
+      "fields": {
+        "dashboards": {
+          "name": "Dashboards",
+          "description": "One or more variants: native, auto, mushroom."
         }
       }
     }
