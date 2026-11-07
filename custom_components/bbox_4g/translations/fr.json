@@ -1,1 +1,126 @@
-1
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connexion à la box Bbox",
+        "description": "Indiquez l'adresse de votre box et ses identifiants d'administration. Le mot de passe est conservé par Home Assistant : il n'apparaît dans aucun fichier de configuration.",
+        "data": {
+          "host": "Adresse de la box",
+          "username": "Identifiant d'administration",
+          "password": "Mot de passe d'administration",
+          "family": "Type de box",
+          "use_tls": "Utiliser HTTPS",
+          "verify_ssl": "Vérifier le certificat TLS"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Mot de passe à ressaisir",
+        "description": "La box a refusé la connexion. Saisissez à nouveau le mot de passe d'administration.",
+        "data": {
+          "password": "Mot de passe d'administration"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossible de joindre la box à cette adresse.",
+      "invalid_auth": "Identifiant ou mot de passe refusé par la box.",
+      "unknown": "Erreur inattendue.",
+      "already_connected": "Une session d'administration est déjà ouverte sur la box (interface web ou autre instance). Fermez-la, ou attendez quelques minutes, puis réessayez."
+    },
+    "abort": {
+      "already_configured": "Cette box est déjà configurée.",
+      "reauth_successful": "Mot de passe mis à jour."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options Bbox",
+        "description": "Réglages de l'intégration.",
+        "data": {
+          "scan_interval": "Fréquence d'interrogation (secondes)",
+          "block_scope": "Portée du blocage d'un appareil",
+          "write_dashboard": "Écrire les tableaux de bord dans /config/lovelace"
+        }
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Actualiser",
+      "description": "Relit l'état de la box."
+    },
+    "block_device": {
+      "name": "Bloquer un appareil",
+      "description": "Bloque un appareil sur le réseau de la box.",
+      "fields": {
+        "mac": {
+          "name": "Adresse MAC",
+          "description": "Adresse MAC de l'appareil à bloquer."
+        }
+      }
+    },
+    "unblock_device": {
+      "name": "Libérer un appareil",
+      "description": "Libère un appareil bloqué.",
+      "fields": {
+        "mac": {
+          "name": "Adresse MAC",
+          "description": "Adresse MAC de l'appareil à libérer."
+        }
+      }
+    },
+    "set_wifi": {
+      "name": "Commuter le Wi-Fi",
+      "description": "Allume ou éteint le Wi-Fi de la box.",
+      "fields": {
+        "band": {
+          "name": "Bande",
+          "description": "« all », « 24 » ou « 5 »."
+        },
+        "enabled": {
+          "name": "Activé",
+          "description": "true pour allumer, false pour éteindre."
+        }
+      }
+    },
+    "wake_device": {
+      "name": "Réveiller un appareil",
+      "description": "Envoie un paquet magique (Wake-on-LAN) pour allumer l'appareil.",
+      "fields": {
+        "mac": {
+          "name": "Adresse MAC",
+          "description": "Adresse MAC de l'appareil à réveiller."
+        }
+      }
+    },
+    "set_internet_access": {
+      "name": "Couper l'accès Internet d'un appareil",
+      "description": "Coupe (ou rétablit) la sortie Internet d'un appareil, Wi-Fi ou filaire. L'appareil garde son adresse IP et reste joignable sur le réseau local.",
+      "fields": {
+        "mac": {
+          "name": "Adresse MAC",
+          "description": "Adresse MAC de l'appareil concerné."
+        },
+        "allowed": {
+          "name": "Accès autorisé",
+          "description": "false pour couper l'accès Internet, true pour le rétablir."
+        }
+      }
+    },
+    "set_wifi_access": {
+      "name": "Autoriser ou refuser le Wi-Fi d'un appareil",
+      "description": "Ajoute l'appareil à la liste noire de son réseau Wi-Fi (il est déconnecté), ou l'en retire.",
+      "fields": {
+        "mac": {
+          "name": "Adresse MAC",
+          "description": "Adresse MAC de l'appareil concerné."
+        },
+        "allowed": {
+          "name": "Accès autorisé",
+          "description": "false pour déconnecter du Wi-Fi, true pour le reconnecter."
+        }
+      }
+    }
+  }
+}

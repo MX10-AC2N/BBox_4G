@@ -1,0 +1,88 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to the Bbox router",
+        "description": "Enter your router address and admin credentials. The password is stored by Home Assistant: it never appears in a configuration file.",
+        "data": {
+          "host": "Router address",
+          "username": "Admin username",
+          "password": "Admin password",
+          "family": "Router type",
+          "use_tls": "Use HTTPS",
+          "verify_ssl": "Verify TLS certificate"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Password required",
+        "description": "The router refused the connection. Enter the admin password again.",
+        "data": {
+          "password": "Admin password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the router at this address.",
+      "invalid_auth": "The router refused this username or password.",
+      "unknown": "Unexpected error.",
+      "already_connected": "An admin session is already open on the router (web interface or another instance). Close it, or wait a few minutes, then retry."
+    },
+    "abort": {
+      "already_configured": "This router is already configured.",
+      "reauth_successful": "Password updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bbox options",
+        "description": "Integration settings.",
+        "data": {
+          "scan_interval": "Polling interval (seconds)",
+          "block_scope": "Device blocking scope",
+          "presence_entities": "Create a presence sensor per device"
+        }
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Refresh",
+      "description": "Re-reads the router state."
+    },
+    "block_device": {
+      "name": "Block a device",
+      "description": "Blocks a device on the router network.",
+      "fields": {
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device to block."
+        }
+      }
+    },
+    "unblock_device": {
+      "name": "Unblock a device",
+      "description": "Releases a blocked device.",
+      "fields": {
+        "mac": {
+          "name": "MAC address",
+          "description": "MAC address of the device to release."
+        }
+      }
+    },
+    "set_wifi": {
+      "name": "Toggle Wi-Fi",
+      "description": "Turns the router Wi-Fi on or off.",
+      "fields": {
+        "band": {
+          "name": "Band",
+          "description": "“all”, “24” or “5”."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "true to turn on, false to turn off."
+        }
+      }
+    }
+  }
+}
