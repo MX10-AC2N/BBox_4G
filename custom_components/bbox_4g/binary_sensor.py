@@ -21,7 +21,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import BboxCoordinator
-from .devices import async_purge_disparus, get_device_info_for_client
+from .devices import async_purge_disparus, get_device_info_for_client, is_client_separate
 
 
 async def async_setup_entry(
@@ -77,7 +77,11 @@ class BboxPresenceSensor(CoordinatorEntity, BinarySensorEntity):
         self._mac = mac.lower()
         self._name = name or mac
         self._attr_unique_id = f"presence_{self._mac}"
-        self._attr_name = "Présence"
+        # Nom court si appareil indépendant, sinon « Présence – <client> »
+        if is_client_separate(entry, self._mac):
+            self._attr_name = "Présence"
+        else:
+            self._attr_name = f"Présence – {self._name}"
         self._attr_device_info = get_device_info_for_client(
             entry,
             {"mac": self._mac, "name": self._name, **(device or {})},

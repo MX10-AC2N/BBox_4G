@@ -17,7 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTR_ACTIVE, ATTR_IP, ATTR_LINK, ATTR_MAC, DOMAIN
 from .coordinator import BboxCoordinator
-from .devices import async_purge_disparus, get_device_info_for_client
+from .devices import async_purge_disparus, get_device_info_for_client, is_client_separate
 
 
 async def async_setup_entry(
@@ -57,7 +57,6 @@ class BboxScannerTracker(CoordinatorEntity, ScannerEntity):
     """
 
     _attr_has_entity_name = True
-    _attr_name = "Suivi"
     # Par défaut, Home Assistant désactive les entités de suivi : on veut
     # qu'elles soient visibles.
     _attr_entity_registry_enabled_default = True
@@ -76,6 +75,11 @@ class BboxScannerTracker(CoordinatorEntity, ScannerEntity):
         self._name = name or mac
         self._attr_unique_id = f"tracker_{self._mac}"
         self._attr_mac_address = self._mac
+        # Nom court si appareil indépendant, sinon « Suivi – <client> »
+        if is_client_separate(entry, self._mac):
+            self._attr_name = "Suivi"
+        else:
+            self._attr_name = f"Suivi – {self._name}"
         self._attr_device_info = get_device_info_for_client(
             entry,
             {"mac": self._mac, "name": self._name, **(device or {})},

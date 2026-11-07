@@ -190,7 +190,11 @@ class BboxInternetSwitch(_BboxSwitch):
         self._mac = mac.lower()
         self._name = name or mac
         self._attr_unique_id = f"internet_{self._mac}"
-        self._attr_name = "Accès Internet"
+        # Nom court si appareil indépendant, sinon « Accès Internet – <client> »
+        if is_client_separate(entry, self._mac):
+            self._attr_name = "Accès Internet"
+        else:
+            self._attr_name = f"Accès Internet – {self._name}"
         self._attr_device_info = get_device_info_for_client(
             entry, {"mac": self._mac, "name": self._name}, coordinator.data
         )
@@ -270,7 +274,11 @@ class BboxDeviceWifiSwitch(_BboxSwitch):
         self._mac = mac.lower()
         self._name = name or mac
         self._attr_unique_id = f"wifi_device_{self._mac}"
-        self._attr_name = "Wifi"
+        # Nom court si appareil indépendant, sinon « Wifi – <client> »
+        if is_client_separate(entry, self._mac):
+            self._attr_name = "Wifi"
+        else:
+            self._attr_name = f"Wifi – {self._name}"
         self._attr_device_info = get_device_info_for_client(
             entry, {"mac": self._mac, "name": self._name}, coordinator.data
         )
@@ -358,7 +366,11 @@ class BboxDeviceSwitch(_BboxSwitch):
         self._mac = mac.lower()
         self._name = name or mac
         self._attr_unique_id = f"device_{self._mac}"
-        self._attr_name = "Connexion"
+        # Nom court si appareil indépendant, sinon « Connexion – <client> »
+        if is_client_separate(entry, self._mac):
+            self._attr_name = "Connexion"
+        else:
+            self._attr_name = f"Connexion – {self._name}"
         self._attr_device_info = get_device_info_for_client(
             entry, {"mac": self._mac, "name": self._name}, coordinator.data
         )
@@ -457,7 +469,11 @@ class BboxSeparateDeviceSwitch(_BboxSwitch):
         self._mac = mac.lower()
         self._name = name or mac
         self._attr_unique_id = f"separate_{self._mac}"
-        self._attr_name = "Appareil indépendant"
+        # Nom court si appareil indépendant, sinon « Appareil indépendant – <client> »
+        if is_client_separate(entry, self._mac):
+            self._attr_name = "Appareil indépendant"
+        else:
+            self._attr_name = f"Appareil indépendant – {self._name}"
         # Ce switch est toujours rattaché à la Bbox (ou au client selon le mode)
         self._attr_device_info = get_device_info_for_client(
             entry, {"mac": self._mac, "name": self._name}, coordinator.data
