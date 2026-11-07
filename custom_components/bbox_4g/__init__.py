@@ -6,7 +6,8 @@ L'intégration gère :
   Home Assistant et conservé par Home Assistant, jamais dans un YAML) ;
 * la reconnexion automatique quand la session de la box expire ;
 * la demande d'un nouveau mot de passe quand les identifiants sont refusés ;
-* les capteurs, la présence par appareil et les interrupteurs Wi-Fi / blocage.
+* les capteurs, la présence par appareil et les interrupteurs Wi-Fi / blocage ;
+* la création de tableaux de bord (sidebar) à la demande.
 """
 
 from __future__ import annotations
@@ -35,20 +36,23 @@ from .const import (
     CONF_USERNAME,
     CONF_USE_TLS,
     CONF_VERIFY_SSL,
+    DASHBOARD_CHOICES,
     DEFAULT_BLOCK_SCOPE,
     DEFAULT_FAMILY,
     DEFAULT_USERNAME,
     DOMAIN,
     PLATFORMS,
     SERVICE_BLOCK_DEVICE,
+    SERVICE_CREATE_DASHBOARD,
     SERVICE_REFRESH,
-    SERVICE_SET_WIFI,
     SERVICE_SET_INTERNET,
+    SERVICE_SET_WIFI,
     SERVICE_SET_WIFI_ACCESS,
     SERVICE_UNBLOCK_DEVICE,
     SERVICE_WAKE_DEVICE,
 )
 from .coordinator import BboxCoordinator
+from .dashboard import async_setup_selected_dashboards
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +70,14 @@ ACCESS_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_MAC): cv.string,
         vol.Required("allowed"): cv.boolean,
+    }
+)
+CREATE_DASHBOARD_SCHEMA = vol.Schema(
+    {
+        vol.Required("dashboards"): vol.All(
+            cv.ensure_list,
+            [vol.In(DASHBOARD_CHOICES)],
+        )
     }
 )
 
@@ -229,6 +241,24 @@ def _async_register_services(hass: HomeAssistant) -> None:
             call, lambda coord: _bloquer(coord, mac, bloque, "wifi")
         )
 
+    async def _create_dashboard(call: ServiceCall) -> None:
+        """Crée / met à jour les dashboards sélectionnés (sidebar)."""
+        selected = call.data.get("dashboards") or []
+        if isinstance(selected, str):
+            selected = [selected]
+        selected = [s for s in selected if s in DASHBOARD_CHOICES]
+        if not selected:
+            raise HomeAssistantError(
+                "Select at least one dashboard: native, auto or mushroom."
+            )
+        created = await async_setup_selected_dashboards(
+            hass, selected, notify=True
+        )
+        if not created:
+            raise HomeAssistantError(
+                "No dashboard could be created. Check the logs for details."
+            )
+
     hass.services.async_register(DOMAIN, SERVICE_REFRESH, _refresh)
     hass.services.async_register(DOMAIN, SERVICE_WAKE_DEVICE, _wake)
     hass.services.async_register(DOMAIN, SERVICE_SET_INTERNET, _set_internet)
@@ -236,3 +266,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, SERVICE_BLOCK_DEVICE, _block)
     hass.services.async_register(DOMAIN, SERVICE_UNBLOCK_DEVICE, _unblock)
     hass.services.async_register(DOMAIN, SERVICE_SET_WIFI, _set_wifi)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CREATE_DASHBOARD,
+        _create_dashboard,
+        schema=CREATE_DASHBOARD_SCHEMA,
+    )
