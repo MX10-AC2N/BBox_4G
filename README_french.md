@@ -2,6 +2,8 @@
 
 🇬🇧 [English version](README.md)
 
+[![Validate](https://github.com/MX10-AC2N/BBox_4G/actions/workflows/validate.yml/badge.svg)](https://github.com/MX10-AC2N/BBox_4G/actions/workflows/validate.yml)
+
 Intégration personnalisée (HACS) pour les box Bouygues Telecom : voir **qui est connecté**,
 **couper le Wi-Fi** et **bloquer un appareil**, en local, sans cloud ni dépendance Python.
 
