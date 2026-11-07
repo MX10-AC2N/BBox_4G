@@ -1,115 +1,113 @@
 refresh:
   name: Refresh
-  description: >-
-    Immediately re-reads the state of the router (connected devices, Wi-Fi,
-    blocking).
+  description: Re-reads the state of the router.
 
 block_device:
   name: Block a device
-  description: >-
-    Blocks the given device: it is disconnected from the router network and
-    can no longer reconnect.
+  description: Blocks a device on the router network.
   fields:
     mac:
       name: MAC address
-      description: MAC address of the device to block (e.g. aa:bb:cc:dd:ee:ff).
+      description: MAC address of the device to block.
       required: true
-      example: aa:bb:cc:dd:ee:ff
+      example: "aa:bb:cc:dd:ee:ff"
       selector:
         text:
 
 unblock_device:
   name: Unblock a device
-  description: >-
-    Removes the device from the router filter: it can connect again.
+  description: Releases a blocked device.
   fields:
     mac:
       name: MAC address
       description: MAC address of the device to release.
       required: true
-      example: aa:bb:cc:dd:ee:ff
+      example: "aa:bb:cc:dd:ee:ff"
       selector:
         text:
 
 set_wifi:
   name: Toggle Wi-Fi
-  description: >-
-    Turns the router Wi-Fi on or off, globally or per band.
+  description: Turns the router Wi-Fi on or off.
   fields:
     band:
       name: Band
-      description: >-
-        "all" for both bands, "24" for 2.4 GHz, "5" for 5 GHz.
+      description: “all”, “24” or “5”.
       required: true
-      default: all
+      example: "all"
       selector:
         select:
           options:
-            - all
+            - "all"
             - "24"
             - "5"
     enabled:
       name: Enabled
-      description: "true to turn on, false to turn off."
+      description: true to turn on, false to turn off.
       required: true
-      default: true
       selector:
         boolean:
 
 wake_device:
   name: Wake a device
-  description: >-
-    Sends a magic packet (Wake-on-LAN): the computer powers on if it is
-    configured for that. The router is not involved, it is a broadcast on
-    the local network.
+  description: Sends a magic packet (Wake-on-LAN) to power the device on.
   fields:
     mac:
       name: MAC address
       description: MAC address of the device to wake.
       required: true
-      example: aa:bb:cc:dd:ee:ff
+      example: "aa:bb:cc:dd:ee:ff"
       selector:
         text:
 
 set_internet_access:
   name: Cut Internet access of a device
-  description: >-
-    Cuts (or restores) the Internet output of a device, Wi-Fi or wired.
-    The device keeps its IP address and stays reachable on the local network.
+  description: Cuts (or restores) the Internet output of a device.
   fields:
     mac:
       name: MAC address
-      description: MAC address of the device concerned.
       required: true
-      example: aa:bb:cc:dd:ee:ff
       selector:
         text:
     allowed:
       name: Access allowed
-      description: "false to cut Internet access, true to restore it."
       required: true
-      default: false
       selector:
         boolean:
 
 set_wifi_access:
   name: Allow or deny Wi-Fi of a device
-  description: >-
-    Adds the device to the black list of its Wi-Fi network (it is
-    disconnected), or removes it. This is exactly what the router's own
-    "Internet access" switch does.
+  description: Adds the device to the black list of its Wi-Fi network, or removes it.
   fields:
     mac:
       name: MAC address
-      description: MAC address of the device concerned.
       required: true
-      example: aa:bb:cc:dd:ee:ff
       selector:
         text:
     allowed:
       name: Access allowed
-      description: "false to disconnect from Wi-Fi, true to reconnect."
       required: true
-      default: false
       selector:
         boolean:
+
+create_dashboard:
+  name: Create / update dashboards
+  description: >
+    Creates the selected Bbox dashboards in the sidebar (storage mode).
+    Choose which variants to install.
+  fields:
+    dashboards:
+      name: Dashboards
+      description: One or more variants to create.
+      required: true
+      example: '["auto"]'
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Native (no extra cards)
+              value: native
+            - label: Auto-entities (dynamic)
+              value: auto
+            - label: Mushroom (nice UI)
+              value: mushroom

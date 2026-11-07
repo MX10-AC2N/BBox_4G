@@ -1,10 +1,4 @@
-"""Config flow de l'intégration « Bbox ».
-
-L'utilisateur saisit l'adresse de la box, son identifiant et son mot de
-passe : le mot de passe n'apparaît donc jamais dans un fichier YAML, il est
-conservé par Home Assistant dans son propre stockage et redemandé par
-l'interface dès qu'il faut le ressaisir.
-"""
+"""Config flow de l'intégration « Bbox »."""
 
 from __future__ import annotations
 
@@ -15,26 +9,30 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback
+from homeassistant.helpers import config_validation as cv
 
 from .bbox_api import BboxAuthError, BboxError, detect_client
 from .const import (
     BLOCK_SCOPES,
     CONF_BLOCK_SCOPE,
+    CONF_DASHBOARDS,
     CONF_DEVICE_MODE,
     CONF_FAMILY,
     CONF_HOST,
     CONF_PASSWORD,
-    CONF_DASHBOARD,
     CONF_SCAN_INTERVAL,
-    CONF_SEPARATE_MACS,
     CONF_USERNAME,
     CONF_USE_TLS,
     CONF_VERIFY_SSL,
+    DASHBOARD_AUTO,
+    DASHBOARD_CHOICES,
+    DASHBOARD_MUSHROOM,
+    DASHBOARD_NATIVE,
     DEFAULT_BLOCK_SCOPE,
+    DEFAULT_DASHBOARDS,
     DEFAULT_DEVICE_MODE,
     DEFAULT_FAMILY,
     DEFAULT_HOST,
-    DEFAULT_DASHBOARD,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USERNAME,
     DEVICE_MODES,
@@ -43,22 +41,22 @@ from .const import (
     SCAN_INTERVAL_MAX,
     SCAN_INTERVAL_MIN,
 )
+from .dashboard import async_setup_selected_dashboards
 
 _LOGGER = logging.getLogger(__name__)
 
+DASHBOARD_LABELS = {
+    DASHBOARD_NATIVE: "Native (no extra cards)",
+    DASHBOARD_AUTO: "Auto-entities (dynamic list) — requires HACS auto-entities",
+    DASHBOARD_MUSHROOM: "Mushroom (nice UI) — requires HACS Mushroom + auto-entities",
+}
+
 
 def _is_session_busy(error: BaseException) -> bool:
-    """La box refuse-t-elle la connexion car une session est déjà ouverte ?
-
-    Les box Huawei n'acceptent qu'une seule session d'administration : si
-    l'interface web de la box est ouverte, ou si une autre instance
-    interroge déjà la box, la connexion est refusée (code ``108003``).
-    """
     return "108003" in str(error)
 
 
 def _user_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
-    """Schéma du formulaire principal."""
     defaults = defaults or {}
     return vol.Schema(
         {
@@ -91,12 +89,9 @@ class BboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._data: dict[str, Any] = {}
         self._reauth_entry: config_entries.ConfigEntry | None = None
 
-    # -- étape principale ---------------------------------------------------
-
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Première connexion : adresse, identifiant et mot de passe."""
         errors: dict[str, str] = {}
         if user_input is not None:
             data = {
@@ -115,8 +110,8 @@ class BboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = (
                     "already_connected" if _is_session_busy(err) else "cannot_connect"
                 )
-            except Exception:  # pragma: no cover - filet de sécurité
-                _LOGGER.exception("Erreur inattendue pendant la validation")
+            except Exception:
+                _LOGGER.exception("Unexpected error during validation")
                 errors["base"] = "unknown"
             else:
                 await self.async_set_unique_id(data[CONF_HOST])
@@ -129,24 +124,18 @@ class BboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=_user_schema(), errors=errors
         )
 
-    # -- re-authentification ------------------------------------------------
-
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
     ) -> ConfigFlowResult:
-        """Le mot de passe est refusé : on le redemande."""
         self._reauth_entry = self._get_reauth_entry()
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Formulaire de re-authentification (mot de passe uniquement)."""
         errors: dict[str, str] = {}
-        entry = self._reauth_entry
-        if entry is None:
-            entry = self._get_reauth_entry()
-            self._reauth_entry = entry
+        entry = self._reauth_entry or self._get_reauth_entry()
+        self._reauth_entry = entry
 
         if user_input is not None:
             data = {**entry.data, CONF_PASSWORD: user_input[CONF_PASSWORD]}
@@ -159,10 +148,6 @@ class BboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "already_connected" if _is_session_busy(err) else "cannot_connect"
                 )
             else:
-                # ``async_update_reload_and_abort`` met à jour l'entrée
-                # *et* la recharge : inutile de faire les deux (le
-                # rechargement déclenchait un second rechargement via le
-                # listener d'options).
                 return await self.async_update_reload_and_abort(entry, data=data)
 
         return self.async_show_form(
@@ -172,25 +157,14 @@ class BboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={CONF_HOST: entry.data.get(CONF_HOST, "")},
         )
 
-    # -- options ------------------------------------------------------------
-
     @staticmethod
     @callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
-        """Retourne le formulaire d'options."""
         return BboxOptionsFlow()
 
-    # -- validation ---------------------------------------------------------
-
     def _validate(self, data: dict[str, Any]) -> None:
-        """Vérifie que la box répond et que le mot de passe est accepté.
-
-        La session enregistrée est réutilisée : la box n'accepte qu'une
-        seule session d'administration à la fois, en ouvrir une deuxième
-        serait refusé (« 108003 »).
-        """
         client = detect_client(
             host=data[CONF_HOST],
             password=data[CONF_PASSWORD],
@@ -204,40 +178,51 @@ class BboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class BboxOptionsFlow(config_entries.OptionsFlow):
-    """Réglages avancés : périodicité, portée du blocage, mode des appareils."""
+    """Options : polling, blocage, mode appareils, dashboards."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Affiche et enregistre les options."""
         if user_input is not None:
             interval = int(user_input[CONF_SCAN_INTERVAL])
-            # On conserve la liste des exceptions déjà configurées
-            # (gérée par le switch « Appareil indépendant »).
             current_options = dict(getattr(self.config_entry, "options", {}) or {})
-            separate_macs = current_options.get(CONF_SEPARATE_MACS, [])
+            separate_macs = current_options.get("separate_macs", [])
 
-            return self.async_create_entry(
-                title="",
-                data={
-                    CONF_SCAN_INTERVAL: max(
-                        SCAN_INTERVAL_MIN, min(SCAN_INTERVAL_MAX, interval)
-                    ),
-                    CONF_BLOCK_SCOPE: user_input.get(
-                        CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE
-                    ),
-                    CONF_DASHBOARD: user_input.get(
-                        CONF_DASHBOARD, DEFAULT_DASHBOARD
-                    ),
-                    CONF_DEVICE_MODE: user_input.get(
-                        CONF_DEVICE_MODE, DEFAULT_DEVICE_MODE
-                    ),
-                    CONF_SEPARATE_MACS: separate_macs,
-                },
-            )
+            selected = user_input.get(CONF_DASHBOARDS, [])
+            if isinstance(selected, str):
+                selected = [selected]
+            selected = [s for s in selected if s in DASHBOARD_CHOICES]
+
+            new_options = {
+                CONF_SCAN_INTERVAL: max(
+                    SCAN_INTERVAL_MIN, min(SCAN_INTERVAL_MAX, interval)
+                ),
+                CONF_BLOCK_SCOPE: user_input.get(
+                    CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE
+                ),
+                CONF_DEVICE_MODE: user_input.get(
+                    CONF_DEVICE_MODE, DEFAULT_DEVICE_MODE
+                ),
+                CONF_DASHBOARDS: selected,
+                "separate_macs": separate_macs,
+            }
+
+            result = self.async_create_entry(title="", data=new_options)
+
+            # Créer / mettre à jour les dashboards choisis
+            if selected:
+                self.hass.async_create_task(
+                    async_setup_selected_dashboards(
+                        self.hass, selected, notify=True
+                    )
+                )
+
+            return result
 
         options = getattr(self, "config_entry", None)
         current = dict(options.options) if options else {}
+        current_dashboards = current.get(CONF_DASHBOARDS, DEFAULT_DASHBOARDS)
+
         schema = vol.Schema(
             {
                 vol.Required(
@@ -252,13 +237,13 @@ class BboxOptionsFlow(config_entries.OptionsFlow):
                     default=current.get(CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE),
                 ): vol.In(BLOCK_SCOPES),
                 vol.Required(
-                    CONF_DASHBOARD,
-                    default=current.get(CONF_DASHBOARD, DEFAULT_DASHBOARD),
-                ): bool,
-                vol.Required(
                     CONF_DEVICE_MODE,
                     default=current.get(CONF_DEVICE_MODE, DEFAULT_DEVICE_MODE),
                 ): vol.In(DEVICE_MODES),
+                vol.Optional(
+                    CONF_DASHBOARDS,
+                    default=current_dashboards,
+                ): cv.multi_select(DASHBOARD_LABELS),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
