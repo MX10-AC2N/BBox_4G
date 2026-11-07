@@ -244,7 +244,7 @@ def _write(path: str, contenu: str) -> bool:
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(contenu)
     except OSError as err:  # pragma: no cover - droits d'écriture
-        _LOGGER.warning("Impossible d'écrire le tableau de bord : %s", err)
+        _LOGGER.warning("Unable to write the dashboard: %s", err)
         return False
     return True
 

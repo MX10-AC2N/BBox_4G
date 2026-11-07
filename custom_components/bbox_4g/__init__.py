@@ -99,12 +99,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except BboxAuthError as err:
         # Identifiants refusés : Home Assistant va proposer de ressaisir
         # le mot de passe.
-        _LOGGER.error("Identifiants refusés par la box : %s", err)
+        _LOGGER.error("Credentials rejected by the router: %s", err)
         raise ConfigEntryAuthFailed(str(err)) from err
     except BboxError as err:
         # Box momentanément injoignable : on demande un nouvel essai plus
         # tard plutôt que de laisser l'intégration en échec.
-        _LOGGER.error("Box injoignable (%s) : %s", entry.data.get(CONF_HOST), err)
+        _LOGGER.error("Router unreachable (%s): %s", entry.data.get(CONF_HOST), err)
         raise ConfigEntryNotReady(str(err)) from err
 
     coordinator = BboxCoordinator(hass, entry, client)
@@ -167,21 +167,21 @@ def _async_register_services(hass: HomeAssistant) -> None:
         """
         coordinators = _coordinators(hass)
         if not coordinators:
-            raise HomeAssistantError("Aucune box Bbox configurée.")
+            raise HomeAssistantError("No Bbox router configured.")
         erreurs: list[str] = []
         for coordinator in coordinators:
             try:
                 await hass.async_add_executor_job(action, coordinator)
             except BboxAuthError as err:
                 raise HomeAssistantError(
-                    f"Mot de passe refusé par la box : {err}"
+                    f"Password rejected by the router: {err}"
                 ) from err
             except BboxError as err:
                 erreurs.append(f"{coordinator.client.host} : {err}")
                 continue
             await coordinator.async_request_refresh()
         if erreurs:
-            raise HomeAssistantError(" ; ".join(erreurs))
+            raise HomeAssistantError("; ".join(erreurs))
 
     def _bloquer(coordinator: BboxCoordinator, mac: str, bloque: bool, portee: str):
         """Bloquent (ou libèrent) un appareil sur une box."""
@@ -213,7 +213,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         try:
             await hass.async_add_executor_job(wake_on_lan, call.data[ATTR_MAC])
         except BboxError as err:
-            raise HomeAssistantError(f"Réveil impossible : {err}") from err
+            raise HomeAssistantError(f"Wake-on-LAN failed: {err}") from err
 
     async def _set_internet(call: ServiceCall) -> None:
         mac = call.data[ATTR_MAC]

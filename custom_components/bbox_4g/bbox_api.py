@@ -2634,7 +2634,7 @@ class HuaweiCpe:
                 self.set_internet_access(mac, allowed=not blocked)
             except BboxError as err:
                 _LOGGER.warning(
-                    "Accès Internet non modifié pour %s : %s", mac, err
+                    "Internet access not changed for %s: %s", mac, err
                 )
         if scope not in ("lan", "wifi", "internet", "all"):
             raise BboxError(f"Portée de blocage inconnue : {scope}")
@@ -3135,9 +3135,9 @@ class HuaweiCpe:
             )
         if blocked:
             _LOGGER.warning(
-                "Filtre MAC mis à jour : vérifiez dans l'interface web que "
-                "l'appareil concerné a bien perdu l'accès à Internet et que "
-                "les autres conservent le leur."
+                "MAC filter updated: check in the router web interface that "
+                "only the targeted device lost Internet access and that "
+                "the others kept theirs."
             )
 
     @_synchronized

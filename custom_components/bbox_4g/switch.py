@@ -92,10 +92,10 @@ class _BboxSwitch(CoordinatorEntity, SwitchEntity):
             await self.hass.async_add_executor_job(func, *args)
         except BboxAuthError as err:
             raise HomeAssistantError(
-                f"Mot de passe refusé par la box : {err}"
+                f"Password rejected by the router: {err}"
             ) from err
         except BboxError as err:
-            raise HomeAssistantError(f"Commande refusée par la box : {err}") from err
+            raise HomeAssistantError(f"Command rejected by the router: {err}") from err
         await self.coordinator.async_request_refresh()
 
 

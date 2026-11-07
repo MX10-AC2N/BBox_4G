@@ -94,7 +94,7 @@ class BboxWakeButton(_BboxButton):
         try:
             await self.hass.async_add_executor_job(wake_on_lan, self._mac)
         except BboxError as err:
-            raise HomeAssistantError(f"Réveil impossible : {err}") from err
+            raise HomeAssistantError(f"Wake-on-LAN failed: {err}") from err
 
 
 class BboxRefreshButton(_BboxButton):
@@ -127,7 +127,7 @@ class BboxReconnectButton(_BboxButton):
             await self.coordinator.async_reconnect()
         except BboxAuthError as err:
             raise HomeAssistantError(
-                f"Mot de passe refusé par la box : {err}"
+                f"Password rejected by the router: {err}"
             ) from err
         except BboxError as err:
-            raise HomeAssistantError(f"Reconnexion impossible : {err}") from err
+            raise HomeAssistantError(f"Reconnection failed: {err}") from err

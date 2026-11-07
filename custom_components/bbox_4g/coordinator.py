@@ -113,7 +113,7 @@ class BboxCoordinator(DataUpdateCoordinator):
             await async_write_dashboard(self.hass, devices)
         except Exception as err:  # pragma: no cover - défense
             _LOGGER.warning(
-                "Impossible de mettre à jour le tableau de bord : %s", err
+                "Unable to update the dashboard: %s", err
             )
 
     def _read_state(self) -> dict[str, Any]:
