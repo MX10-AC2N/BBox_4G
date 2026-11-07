@@ -20,20 +20,24 @@ from .bbox_api import BboxAuthError, BboxError, detect_client
 from .const import (
     BLOCK_SCOPES,
     CONF_BLOCK_SCOPE,
+    CONF_DEVICE_MODE,
     CONF_FAMILY,
     CONF_HOST,
     CONF_PASSWORD,
     CONF_DASHBOARD,
     CONF_SCAN_INTERVAL,
+    CONF_SEPARATE_MACS,
     CONF_USERNAME,
     CONF_USE_TLS,
     CONF_VERIFY_SSL,
     DEFAULT_BLOCK_SCOPE,
+    DEFAULT_DEVICE_MODE,
     DEFAULT_FAMILY,
     DEFAULT_HOST,
     DEFAULT_DASHBOARD,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_USERNAME,
+    DEVICE_MODES,
     DOMAIN,
     FAMILIES,
     SCAN_INTERVAL_MAX,
@@ -200,7 +204,7 @@ class BboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class BboxOptionsFlow(config_entries.OptionsFlow):
-    """Réglages avancés : périodicité, portée du blocage, entités de présence."""
+    """Réglages avancés : périodicité, portée du blocage, mode des appareils."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -208,6 +212,11 @@ class BboxOptionsFlow(config_entries.OptionsFlow):
         """Affiche et enregistre les options."""
         if user_input is not None:
             interval = int(user_input[CONF_SCAN_INTERVAL])
+            # On conserve la liste des exceptions déjà configurées
+            # (gérée par le switch « Appareil indépendant »).
+            current_options = dict(getattr(self.config_entry, "options", {}) or {})
+            separate_macs = current_options.get(CONF_SEPARATE_MACS, [])
+
             return self.async_create_entry(
                 title="",
                 data={
@@ -220,6 +229,10 @@ class BboxOptionsFlow(config_entries.OptionsFlow):
                     CONF_DASHBOARD: user_input.get(
                         CONF_DASHBOARD, DEFAULT_DASHBOARD
                     ),
+                    CONF_DEVICE_MODE: user_input.get(
+                        CONF_DEVICE_MODE, DEFAULT_DEVICE_MODE
+                    ),
+                    CONF_SEPARATE_MACS: separate_macs,
                 },
             )
 
@@ -230,7 +243,10 @@ class BboxOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(
                     CONF_SCAN_INTERVAL,
                     default=current.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-                ): vol.All(vol.Coerce(int), vol.Range(min=SCAN_INTERVAL_MIN, max=SCAN_INTERVAL_MAX)),
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=SCAN_INTERVAL_MIN, max=SCAN_INTERVAL_MAX),
+                ),
                 vol.Required(
                     CONF_BLOCK_SCOPE,
                     default=current.get(CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE),
@@ -239,6 +255,10 @@ class BboxOptionsFlow(config_entries.OptionsFlow):
                     CONF_DASHBOARD,
                     default=current.get(CONF_DASHBOARD, DEFAULT_DASHBOARD),
                 ): bool,
+                vol.Required(
+                    CONF_DEVICE_MODE,
+                    default=current.get(CONF_DEVICE_MODE, DEFAULT_DEVICE_MODE),
+                ): vol.In(DEVICE_MODES),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

@@ -13,7 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .bbox_api import BboxAuthError, BboxError, wake_on_lan
 from .const import ATTR_MAC, DOMAIN
 from .coordinator import BboxCoordinator
-from .devices import async_purge_disparus, box_device_info, client_device_info
+from .devices import async_purge_disparus, box_device_info, get_device_info_for_client
 
 
 async def async_setup_entry(
@@ -80,7 +80,7 @@ class BboxWakeButton(_BboxButton):
         self._name = name or mac
         self._attr_unique_id = f"wake_{self._mac}"
         self._attr_name = "Réveiller"
-        self._attr_device_info = client_device_info(
+        self._attr_device_info = get_device_info_for_client(
             entry, {"mac": self._mac, "name": self._name}, coordinator.data
         )
 

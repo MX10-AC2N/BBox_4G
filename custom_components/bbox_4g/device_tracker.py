@@ -17,7 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTR_ACTIVE, ATTR_IP, ATTR_LINK, ATTR_MAC, DOMAIN
 from .coordinator import BboxCoordinator
-from .devices import async_purge_disparus, client_device_info
+from .devices import async_purge_disparus, get_device_info_for_client
 
 
 async def async_setup_entry(
@@ -52,7 +52,8 @@ class BboxScannerTracker(CoordinatorEntity, ScannerEntity):
     """Présence d'un appareil suivi par la box.
 
     Une entité par appareil : l'interface de Home Assistant les range sous
-    l'appareil concerné et la présence alimente directement les ``person``.
+    l'appareil concerné (ou sous la Bbox selon le mode configuré) et la
+    présence alimente directement les ``person``.
     """
 
     _attr_has_entity_name = True
@@ -75,7 +76,7 @@ class BboxScannerTracker(CoordinatorEntity, ScannerEntity):
         self._name = name or mac
         self._attr_unique_id = f"tracker_{self._mac}"
         self._attr_mac_address = self._mac
-        self._attr_device_info = client_device_info(
+        self._attr_device_info = get_device_info_for_client(
             entry,
             {"mac": self._mac, "name": self._name, **(device or {})},
             coordinator.data,

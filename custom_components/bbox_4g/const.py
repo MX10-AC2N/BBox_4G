@@ -16,6 +16,8 @@ CONF_FAMILY = "family"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_BLOCK_SCOPE = "block_scope"
 CONF_DASHBOARD = "write_dashboard"
+CONF_DEVICE_MODE = "device_mode"
+CONF_SEPARATE_MACS = "separate_macs"
 
 DEFAULT_HOST = "192.168.1.1"
 DEFAULT_USERNAME = "admin"
@@ -26,6 +28,13 @@ DEFAULT_FAMILY = "auto"
 #: Désactivé par défaut : une intégration ne doit pas modifier les
 #: tableaux de bord de l'utilisateur sans son accord.
 DEFAULT_DASHBOARD = False
+#: Mode par défaut des appareils clients.
+#: ``under_box`` : toutes les entités sont rattachées à l'appareil Bbox.
+#: ``separate``  : chaque client devient un appareil HA indépendant.
+DEFAULT_DEVICE_MODE = "under_box"
+
+#: Modes possibles pour les appareils clients.
+DEVICE_MODES = ("under_box", "separate")
 
 #: Périodicité d'interrogation de la box (secondes).
 SCAN_INTERVAL_MIN = 15
@@ -66,3 +75,4 @@ SERVICE_SET_WIFI = "set_wifi"
 SERVICE_WAKE_DEVICE = "wake_device"
 SERVICE_SET_INTERNET = "set_internet_access"
 SERVICE_SET_WIFI_ACCESS = "set_wifi_access"
+SERVICE_SET_DEVICE_MODE = "set_device_mode"
