@@ -82,10 +82,20 @@ data:
 - **Filtre MAC en liste blanche** : si la box est en politique « liste blanche » avec des appareils autorisés, l'intégration refuse de bloquer pour ne pas couper Internet à tous.
 - **Certificat TLS** : auto-signé, non vérifié par défaut (comportement habituel des box Bouygues).
 
-## Tableaux de bord (optionnel)
+## Tableaux de bord (facultatif)
 
-Avec l'option « Écrire les tableaux de bord », trois fichiers sont créés (`bbox.yaml` natif, `bbox-auto.yaml` avec *auto-entities*, `bbox-mushroom.yaml` avec *Mushroom*).
-Ajoutez-en un via **Paramètres → Tableaux de bord → Ajouter → Vue YAML**.
+1. **Paramètres → Appareils et services → Bbox Bouygues → Configurer**
+2. Activez l'option **Écrire les tableaux de bord** et enregistrez  
+   → trois fichiers sont créés dans le répertoire `/config/lovelace/` :
+   - `bbox.yaml` (cartes natives)
+   - `bbox-auto.yaml` (dynamique, nécessite *auto-entities*)
+   - `bbox-mushroom.yaml` (nécessite *Mushroom* + *auto-entities*)
+
+3. **Paramètres → Tableaux de bord → Ajouter un tableau de bord → Vue YAML**
+4. Sélectionnez l’un des fichiers, par exemple `/config/lovelace/bbox-auto.yaml`
+
+**Recommandé :** `bbox-auto.yaml` ou `bbox-mushroom.yaml`  
+Installez les cartes requises depuis HACS → Frontend si nécessaire.
 
 ## Dépannage
 
