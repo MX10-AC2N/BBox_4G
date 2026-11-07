@@ -21,7 +21,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import BboxCoordinator
-from .devices import async_purge_disparus, client_device_info
+from .devices import async_purge_disparus, get_device_info_for_client
 
 
 async def async_setup_entry(
@@ -56,9 +56,8 @@ async def async_setup_entry(
 class BboxPresenceSensor(CoordinatorEntity, BinarySensorEntity):
     """Présence d'un appareil sur le réseau de la box.
 
-    L'entité est rattachée à l'appareil lui-même : dans l'interface de
-    Home Assistant, elle apparaît sous « Téléphone Ju », « NAS »…
-    L'``entity_id`` en découle (``binary_sensor.telephone_ju_presence``).
+    L'entité est rattachée à l'appareil lui-même ou à la Bbox selon le mode
+    configuré. L'``entity_id`` en découle.
     """
 
     _attr_has_entity_name = True
@@ -79,7 +78,7 @@ class BboxPresenceSensor(CoordinatorEntity, BinarySensorEntity):
         self._name = name or mac
         self._attr_unique_id = f"presence_{self._mac}"
         self._attr_name = "Présence"
-        self._attr_device_info = client_device_info(
+        self._attr_device_info = get_device_info_for_client(
             entry,
             {"mac": self._mac, "name": self._name, **(device or {})},
             coordinator.data,

@@ -1,4 +1,4 @@
-"""Interrupteurs : Wi-Fi (par bande) et blocage d'un appareil."""
+"""Interrupteurs : Wi-Fi (par bande), blocage d'un appareil et mode appareil indépendant."""
 
 from __future__ import annotations
 
@@ -12,9 +12,17 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .bbox_api import BboxAuthError, BboxError
-from .const import ATTR_MAC, CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE, DOMAIN
+from .const import (
+    ATTR_MAC,
+    CONF_BLOCK_SCOPE,
+    CONF_DEVICE_MODE,
+    CONF_SEPARATE_MACS,
+    DEFAULT_BLOCK_SCOPE,
+    DEFAULT_DEVICE_MODE,
+    DOMAIN,
+)
 from .coordinator import BboxCoordinator
-from .devices import box_device_info, client_device_info
+from .devices import box_device_info, get_device_info_for_client, is_client_separate
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,8 +34,8 @@ async def async_setup_entry(
     coordinator: BboxCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     # Interrupteur « connexion » d'un appareil, indexé par sa MAC.
     entities: dict[str, SwitchEntity] = {}
-    # Interrupteurs « Accès Internet » et « Wifi », indexés par
-    # « type:mac ».
+    # Interrupteurs « Accès Internet », « Wifi » et « Appareil indépendant »,
+    # indexés par « type:mac ».
     variantes: dict[str, SwitchEntity] = {}
 
     @callback
@@ -62,6 +70,10 @@ async def async_setup_entry(
                 cle = f"wifi:{mac}"
                 variantes[cle] = BboxDeviceWifiSwitch(coordinator, entry, mac, nom)
                 new_entities.append(variantes[cle])
+            # Interrupteur « Appareil indépendant » (toujours présent).
+            cle = f"separate:{mac}"
+            variantes[cle] = BboxSeparateDeviceSwitch(coordinator, entry, mac, nom)
+            new_entities.append(variantes[cle])
         if new_entities:
             async_add_entities(new_entities)
 
@@ -179,7 +191,7 @@ class BboxInternetSwitch(_BboxSwitch):
         self._name = name or mac
         self._attr_unique_id = f"internet_{self._mac}"
         self._attr_name = "Accès Internet"
-        self._attr_device_info = client_device_info(
+        self._attr_device_info = get_device_info_for_client(
             entry, {"mac": self._mac, "name": self._name}, coordinator.data
         )
 
@@ -259,7 +271,7 @@ class BboxDeviceWifiSwitch(_BboxSwitch):
         self._name = name or mac
         self._attr_unique_id = f"wifi_device_{self._mac}"
         self._attr_name = "Wifi"
-        self._attr_device_info = client_device_info(
+        self._attr_device_info = get_device_info_for_client(
             entry, {"mac": self._mac, "name": self._name}, coordinator.data
         )
 
@@ -347,7 +359,7 @@ class BboxDeviceSwitch(_BboxSwitch):
         self._name = name or mac
         self._attr_unique_id = f"device_{self._mac}"
         self._attr_name = "Connexion"
-        self._attr_device_info = client_device_info(
+        self._attr_device_info = get_device_info_for_client(
             entry, {"mac": self._mac, "name": self._name}, coordinator.data
         )
 
@@ -356,89 +368,142 @@ class BboxDeviceSwitch(_BboxSwitch):
         """L'appareil est-il autorisé ?
 
         L'état suit **la portée choisie** dans les options :
-
-        * ``lan`` : l'appareil n'est pas dans le filtre MAC réseau ;
-        * ``wifi`` : il n'est pas dans la liste noire de son SSID ;
-        * ``internet`` : il n'est pas dans la liste noire du SSID — c'est
-          exactement le commutateur « Accès Internet » du routeur ;
-        * ``all`` : aucune des trois listes ne le contient.
+        - si la portée est « lan » / « internet » → on regarde le filtre MAC
+        - si la portée est « wifi » → on regarde la liste noire Wi-Fi
+        - sinon on regarde le flag générique ``blocked``.
         """
         device = self.coordinator.device_by_mac(self._mac)
         if not device:
             return None
-        portee = self._scope
-        if portee == "lan":
-            return not device.get("blocked_lan", device.get("blocked"))
-        if portee == "wifi":
-            return not device.get("blocked_wifi", device.get("blocked"))
-        if portee == "internet":
-            value = device.get("internet_allowed")
-            return None if value is None else bool(value)
-        return not device.get("blocked")
+        options = getattr(self._entry, "options", {}) or {}
+        scope = options.get(CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE)
+        if scope in ("lan", "internet"):
+            blocked = device.get("blocked_lan")
+            if blocked is None:
+                blocked = device.get("blocked")
+        elif scope == "wifi":
+            blocked = device.get("blocked_wifi")
+            if blocked is None:
+                blocked = device.get("blocked")
+        else:
+            blocked = device.get("blocked")
+        if blocked is None:
+            # Pas d'info de blocage : on se base sur la présence.
+            return bool(device.get("active"))
+        return not bool(blocked)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Détails de l'appareil et portée du blocage."""
+        """Détails de l'appareil."""
         device = self.coordinator.device_by_mac(self._mac) or {}
+        options = getattr(self._entry, "options", {}) or {}
         return {
             ATTR_MAC: self._mac,
             "appareil": "client",
             "nom": device.get("name"),
             "ip": device.get("ip"),
             "lien": device.get("link"),
-            "bloque": bool(device.get("blocked")),
-            "bloque_reseau": bool(device.get("blocked_lan")),
-            "bloque_wifi": bool(device.get("blocked_wifi")),
-            # « acces_internet » = filtre MAC réseau (portée « lan ») ;
-            # « internet_allowed » = liste noire du SSID (portée
-            # « internet », le commutateur du routeur).
-            "acces_internet": device.get("acces_internet"),
-            "internet_allowed": device.get("internet_allowed"),
+            "ssid": device.get("ssid"),
             "connecte": bool(device.get("active")),
-            # Version textuelle : plus simple à filtrer dans une carte
-            # communautaire (« connecte » / « deconnecte »).
-            "etat_connexion": (
-                "connecte" if device.get("active") else "deconnecte"
-            ),
-            "acces": self._acces(device),
-            "portee": self._scope,
+            "bloque": bool(device.get("blocked")),
+            "bloque_reseau": device.get("blocked_lan"),
+            "bloque_wifi": device.get("blocked_wifi"),
+            "portee": options.get(CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE),
         }
 
     @property
     def icon(self) -> str:
-        """Icône adaptée à l'état (autorisé / coupé)."""
+        """Icône adaptée à l'état."""
         return "mdi:lan-connect" if self.is_on else "mdi:lan-disconnect"
 
-    @property
-    def _scope(self) -> str:
-        """Portée du blocage configurée."""
-        options = getattr(self._entry, "options", {}) or {}
-        return options.get(CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE)
-
-    def _acces(self, device: dict[str, Any]) -> str:
-        """État d'accès, en texte, selon la portée choisie."""
-        if self._scope == "lan":
-            bloque = device.get("blocked_lan", device.get("blocked"))
-            return "autorise" if not bloque else "coupe"
-        if self._scope == "wifi":
-            bloque = device.get("blocked_wifi", device.get("blocked"))
-            return "autorise" if not bloque else "coupe"
-        if self._scope == "internet":
-            return (
-                "autorise"
-                if device.get("internet_allowed") is not False
-                else "coupe"
-            )
-        return "autorise" if not device.get("blocked") else "coupe"
-
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Rallume : l'appareil est libéré et peut se reconnecter."""
+        """Libère l'appareil (supprime le blocage)."""
+        options = getattr(self._entry, "options", {}) or {}
+        scope = options.get(CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE)
         await self._async_write(
-            self.coordinator.client.set_device_blocked, self._mac, False, self._scope
+            self.coordinator.client.set_device_blocked, self._mac, False, scope
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Éteint : l'appareil est déconnecté (bloqué sur la box)."""
+        """Bloque l'appareil selon la portée configurée."""
+        options = getattr(self._entry, "options", {}) or {}
+        scope = options.get(CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE)
         await self._async_write(
-            self.coordinator.client.set_device_blocked, self._mac, True, self._scope
+            self.coordinator.client.set_device_blocked, self._mac, True, scope
         )
+
+
+class BboxSeparateDeviceSwitch(_BboxSwitch):
+    """Interrupteur « Appareil indépendant ».
+
+    * ``on``  : l'appareil obtient son propre device Home Assistant.
+    * ``off`` : les entités de l'appareil restent rattachées à la Bbox.
+
+    Le changement nécessite un rechargement de l'intégration (le DeviceInfo
+    est fixé à la création des entités).
+    """
+
+    _attr_icon = "mdi:devices"
+    _attr_entity_category = None  # visible par défaut
+
+    def __init__(
+        self,
+        coordinator: BboxCoordinator,
+        entry: ConfigEntry,
+        mac: str,
+        name: str,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._mac = mac.lower()
+        self._name = name or mac
+        self._attr_unique_id = f"separate_{self._mac}"
+        self._attr_name = "Appareil indépendant"
+        # Ce switch est toujours rattaché à la Bbox (ou au client selon le mode)
+        self._attr_device_info = get_device_info_for_client(
+            entry, {"mac": self._mac, "name": self._name}, coordinator.data
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """L'appareil est-il actuellement en mode indépendant ?"""
+        return is_client_separate(self._entry, self._mac)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Informations utiles."""
+        options = getattr(self._entry, "options", {}) or {}
+        return {
+            ATTR_MAC: self._mac,
+            "mode_global": options.get(CONF_DEVICE_MODE, DEFAULT_DEVICE_MODE),
+            "dans_exceptions": self._mac
+            in {m.lower() for m in options.get(CONF_SEPARATE_MACS, [])},
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Passe l'appareil en mode indépendant et recharge l'intégration."""
+        await self._set_separate(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Repasse l'appareil sous la Bbox et recharge l'intégration."""
+        await self._set_separate(False)
+
+    async def _set_separate(self, separate: bool) -> None:
+        """Met à jour la liste ``separate_macs`` puis recharge l'intégration."""
+        options = dict(getattr(self._entry, "options", {}) or {})
+        current = {m.lower() for m in options.get(CONF_SEPARATE_MACS, [])}
+
+        if separate:
+            current.add(self._mac)
+        else:
+            current.discard(self._mac)
+
+        options[CONF_SEPARATE_MACS] = sorted(current)
+
+        # On conserve les autres options.
+        options.setdefault(
+            CONF_DEVICE_MODE, options.get(CONF_DEVICE_MODE, DEFAULT_DEVICE_MODE)
+        )
+
+        self.hass.config_entries.async_update_entry(self._entry, options=options)
+        # Le DeviceInfo est fixé à la création : il faut recharger.
+        await self.hass.config_entries.async_reload(self._entry.entry_id)
