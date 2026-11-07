@@ -2,8 +2,8 @@
 
 Deux modes :
 
-1. **Storage** (recommandé) — le dashboard apparaît directement dans la
-   barre latérale, sans toucher à ``configuration.yaml``.
+1. **Storage** (recommandé) — le dashboard apparaît dans la barre latérale
+   et reste **éditable** depuis l\'interface Home Assistant.
 2. **Fichiers YAML** — écrits dans ``/config/lovelace/`` en secours.
 
 Trois variantes : native, auto-entities, Mushroom.
@@ -26,14 +26,12 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Fichiers YAML (secours)
 YAML_FILES = {
     DASHBOARD_NATIVE: "bbox.yaml",
     DASHBOARD_AUTO: "bbox-auto.yaml",
     DASHBOARD_MUSHROOM: "bbox-mushroom.yaml",
 }
 
-# url_path des dashboards storage
 STORAGE_PATHS = {
     DASHBOARD_NATIVE: "bbox",
     DASHBOARD_AUTO: "bbox-auto",
@@ -53,44 +51,67 @@ STORAGE_ICONS = {
 }
 
 ENTITES_BOX = [
-    "switch.bbox_wifi",
-    "switch.bbox_wifi_24_ghz",
-    "switch.bbox_wifi_5_ghz",
     "sensor.bbox_clients_connectes",
     "sensor.bbox_appareils_connus",
     "sensor.bbox_reseau_invite",
+    "switch.bbox_wifi",
+    "switch.bbox_wifi_24_ghz",
+    "switch.bbox_wifi_5_ghz",
     "button.bbox_actualiser",
     "button.bbox_reconnecter",
 ]
 
 
-# ---------------------------------------------------------------------------
-# Contenu des vues (dict Python → storage + YAML)
-# ---------------------------------------------------------------------------
+def _box_status_card() -> dict[str, Any]:
+    return {
+        "type": "entities",
+        "title": "État de la box",
+        "show_header_toggle": False,
+        "entities": list(ENTITES_BOX),
+    }
+
+
+def _auto_entities_card(title: str, include: list[dict[str, Any]]) -> dict[str, Any]:
+    """Carte auto-entities compatible HA 2024+ / 2026.
+
+    On filtre uniquement sur les attributs posés par l\'intégration
+    (``appareil``, ``etat_connexion``, ``acces``), jamais sur
+    ``device_class`` (non exposé de façon fiable dans les state attributes).
+    """
+    return {
+        "type": "custom:auto-entities",
+        "show_empty": True,
+        "card": {
+            "type": "entities",
+            "title": title,
+            "show_header_toggle": False,
+        },
+        "filter": {
+            "include": include,
+            "exclude": [
+                {"entity_id": "*appareil_independant*"},
+                {"entity_id": "*separate*"},
+            ],
+        },
+        "sort": {"method": "name"},
+    }
 
 
 def _view_native() -> dict[str, Any]:
-    """Vue native (aucune carte communautaire)."""
     return {
         "title": "Appareils",
-        "path": "bbox",
+        "path": "home",
         "icon": "mdi:router-wireless",
         "cards": [
-            {
-                "type": "entities",
-                "title": "État de la box",
-                "show_header_toggle": False,
-                "entities": list(ENTITES_BOX),
-            },
+            _box_status_card(),
             {
                 "type": "markdown",
                 "content": (
-                    "### Appareils\n"
-                    "Les interrupteurs de chaque appareil apparaissent sous "
-                    "l’appareil **Bbox** (ou sous l’appareil indépendant).\n\n"
-                    "Pour une liste **dynamique**, utilisez le dashboard "
-                    "**Bbox (auto)** ou **Bbox (Mushroom)** "
-                    "(cartes HACS *auto-entities* / *Mushroom*)."
+                    "### Clients\n"
+                    "Les interrupteurs de chaque appareil sont sous le device "
+                    "**Bbox** (ou sous l\'appareil indépendant).\n\n"
+                    "Pour une liste dynamique, utilisez **Bbox (auto)** ou "
+                    "**Bbox (Mushroom)**."
                 ),
             },
         ],
@@ -98,239 +119,145 @@ def _view_native() -> dict[str, Any]:
 
 
 def _view_auto() -> dict[str, Any]:
-    """Vue dynamique auto-entities."""
     return {
         "title": "Appareils",
-        "path": "bbox-auto",
+        "path": "home",
         "icon": "mdi:router-wireless",
         "cards": [
-            {
-                "type": "entities",
-                "title": "État de la box",
-                "show_header_toggle": False,
-                "entities": list(ENTITES_BOX),
-            },
-            {
-                "type": "custom:auto-entities",
-                "title": "Appareils connectés",
-                "show_empty": True,
-                "card": {"type": "entities", "show_header_toggle": False},
-                "filter": {
-                    "include": [
-                        {
-                            "entity_id": "binary_sensor.*",
-                            "attributes": {"device_class": "connectivity"},
-                            "state": "on",
-                        },
-                        {
-                            "entity_id": "switch.*",
-                            "attributes": {
-                                "appareil": "client",
-                                "etat_connexion": "connecte",
-                            },
-                        },
-                    ],
-                    "exclude": [
-                        {"entity_id": "switch.*appareil_independant*"},
-                        {"entity_id": "switch.*separate*"},
-                    ],
-                },
-                "sort": {"method": "name"},
-            },
-            {
-                "type": "custom:auto-entities",
-                "title": "Appareils déconnectés",
-                "show_empty": True,
-                "card": {"type": "entities", "show_header_toggle": False},
-                "filter": {
-                    "include": [
-                        {
-                            "entity_id": "binary_sensor.*",
-                            "attributes": {"device_class": "connectivity"},
-                            "state": "off",
-                        },
-                        {
-                            "entity_id": "switch.*",
-                            "attributes": {
-                                "appareil": "client",
-                                "etat_connexion": "deconnecte",
-                            },
-                        },
-                    ],
-                    "exclude": [
-                        {"entity_id": "switch.*appareil_independant*"},
-                        {"entity_id": "switch.*separate*"},
-                    ],
-                },
-                "sort": {"method": "name"},
-            },
-            {
-                "type": "custom:auto-entities",
-                "title": "Accès Internet coupé",
-                "show_empty": True,
-                "card": {"type": "entities", "show_header_toggle": False},
-                "filter": {
-                    "include": [
-                        {
-                            "entity_id": "switch.*",
-                            "attributes": {
-                                "appareil": "client",
-                                "acces": "coupe",
-                            },
+            _box_status_card(),
+            _auto_entities_card(
+                "Appareils connectés",
+                [
+                    {
+                        "attributes": {
+                            "appareil": "client",
+                            "etat_connexion": "connecte",
                         }
-                    ]
-                },
-                "sort": {"method": "name"},
-            },
+                    }
+                ],
+            ),
+            _auto_entities_card(
+                "Appareils déconnectés",
+                [
+                    {
+                        "attributes": {
+                            "appareil": "client",
+                            "etat_connexion": "deconnecte",
+                        }
+                    }
+                ],
+            ),
+            _auto_entities_card(
+                "Accès Internet coupé",
+                [
+                    {
+                        "attributes": {
+                            "appareil": "client",
+                            "acces": "coupe",
+                        }
+                    }
+                ],
+            ),
         ],
+    }
+
+
+def _mushroom_entity_options(color: str) -> dict[str, Any]:
+    return {
+        "type": "custom:mushroom-entity-card",
+        "fill_container": True,
+        "icon_color": color,
     }
 
 
 def _view_mushroom() -> dict[str, Any]:
-    """Vue Mushroom + auto-entities."""
+    def _grid_auto(title: str, include: list[dict[str, Any]], color: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "heading",
+                "heading": title,
+                "icon": "mdi:lan-connect" if "Connect" in title or "connect" in title.lower() else "mdi:lan",
+            },
+            {
+                "type": "custom:auto-entities",
+                "show_empty": True,
+                "card": {"type": "grid", "columns": 1, "square": False},
+                "card_param": "cards",
+                "filter": {
+                    "include": include,
+                    "exclude": [
+                        {"entity_id": "*appareil_independant*"},
+                        {"entity_id": "*separate*"},
+                    ],
+                },
+                "options": _mushroom_entity_options(color),
+                "sort": {"method": "name"},
+            },
+        ]
+
+    cards: list[dict[str, Any]] = [
+        {
+            "type": "custom:mushroom-chips-card",
+            "chips": [
+                {
+                    "type": "entity",
+                    "entity": "sensor.bbox_clients_connectes",
+                    "icon_color": "blue",
+                },
+                {
+                    "type": "entity",
+                    "entity": "switch.bbox_wifi",
+                    "icon_color": "blue",
+                },
+                {
+                    "type": "entity",
+                    "entity": "switch.bbox_wifi_24_ghz",
+                    "icon_color": "blue",
+                },
+                {
+                    "type": "entity",
+                    "entity": "switch.bbox_wifi_5_ghz",
+                    "icon_color": "blue",
+                },
+                {
+                    "type": "entity",
+                    "entity": "button.bbox_actualiser",
+                    "icon": "mdi:refresh",
+                },
+            ],
+        },
+        {
+            "type": "custom:mushroom-template-card",
+            "icon": "mdi:router-wireless",
+            "icon_color": "blue",
+            "primary": "{{ states('sensor.bbox_clients_connectes') }} appareil(s) connecté(s)",
+            "secondary": "Bbox Bouygues",
+        },
+    ]
+    cards += _grid_auto(
+        "Connectés",
+        [{"attributes": {"appareil": "client", "etat_connexion": "connecte"}}],
+        "green",
+    )
+    cards += _grid_auto(
+        "Déconnectés",
+        [{"attributes": {"appareil": "client", "etat_connexion": "deconnecte"}}],
+        "grey",
+    )
+    cards += _grid_auto(
+        "Accès Internet coupé",
+        [{"attributes": {"appareil": "client", "acces": "coupe"}}],
+        "red",
+    )
     return {
         "title": "Appareils",
-        "path": "bbox-mushroom",
+        "path": "home",
         "icon": "mdi:mushroom",
-        "cards": [
-            {
-                "type": "custom:mushroom-chips-card",
-                "chips": [
-                    {
-                        "type": "entity",
-                        "entity": "sensor.bbox_clients_connectes",
-                        "icon_color": "blue",
-                    },
-                    {
-                        "type": "entity",
-                        "entity": "switch.bbox_wifi",
-                        "icon_color": "blue",
-                    },
-                    {
-                        "type": "entity",
-                        "entity": "switch.bbox_wifi_24_ghz",
-                        "icon_color": "blue",
-                    },
-                    {
-                        "type": "entity",
-                        "entity": "switch.bbox_wifi_5_ghz",
-                        "icon_color": "blue",
-                    },
-                    {
-                        "type": "entity",
-                        "entity": "button.bbox_actualiser",
-                        "icon": "mdi:refresh",
-                    },
-                ],
-            },
-            {
-                "type": "custom:mushroom-template-card",
-                "icon": "mdi:router-wireless",
-                "icon_color": "blue",
-                "primary": (
-                    "{% set n = states('sensor.bbox_clients_connectes') | int(0) %}"
-                    "{{ n }} appareil(s) connecté(s)"
-                ),
-                "secondary": "Bbox Bouygues",
-            },
-            {
-                "type": "heading",
-                "heading": "Connectés",
-                "icon": "mdi:lan-connect",
-            },
-            {
-                "type": "custom:auto-entities",
-                "show_empty": True,
-                "card": {"type": "grid", "columns": 1, "square": False},
-                "card_param": "cards",
-                "filter": {
-                    "include": [
-                        {
-                            "entity_id": "switch.*",
-                            "attributes": {
-                                "appareil": "client",
-                                "etat_connexion": "connecte",
-                            },
-                        }
-                    ],
-                    "exclude": [
-                        {"entity_id": "switch.*appareil_independant*"},
-                        {"entity_id": "switch.*separate*"},
-                    ],
-                },
-                "options": {
-                    "type": "custom:mushroom-entity-card",
-                    "fill_container": True,
-                    "icon_color": "green",
-                },
-                "sort": {"method": "name"},
-            },
-            {
-                "type": "heading",
-                "heading": "Déconnectés",
-                "icon": "mdi:lan-disconnect",
-            },
-            {
-                "type": "custom:auto-entities",
-                "show_empty": True,
-                "card": {"type": "grid", "columns": 1, "square": False},
-                "card_param": "cards",
-                "filter": {
-                    "include": [
-                        {
-                            "entity_id": "switch.*",
-                            "attributes": {
-                                "appareil": "client",
-                                "etat_connexion": "deconnecte",
-                            },
-                        }
-                    ],
-                    "exclude": [
-                        {"entity_id": "switch.*appareil_independant*"},
-                        {"entity_id": "switch.*separate*"},
-                    ],
-                },
-                "options": {
-                    "type": "custom:mushroom-entity-card",
-                    "fill_container": True,
-                    "icon_color": "grey",
-                },
-                "sort": {"method": "name"},
-            },
-            {
-                "type": "heading",
-                "heading": "Accès Internet coupé",
-                "icon": "mdi:web-off",
-            },
-            {
-                "type": "custom:auto-entities",
-                "show_empty": True,
-                "card": {"type": "grid", "columns": 1, "square": False},
-                "card_param": "cards",
-                "filter": {
-                    "include": [
-                        {
-                            "entity_id": "switch.*",
-                            "attributes": {
-                                "appareil": "client",
-                                "acces": "coupe",
-                            },
-                        }
-                    ]
-                },
-                "options": {
-                    "type": "custom:mushroom-entity-card",
-                    "fill_container": True,
-                    "icon_color": "red",
-                },
-                "sort": {"method": "name"},
-            },
-        ],
+        "cards": cards,
     }
 
 
 def _config_for(kind: str) -> dict[str, Any]:
-    """Config Lovelace complète pour un type de dashboard."""
     views = {
         DASHBOARD_NATIVE: [_view_native()],
         DASHBOARD_AUTO: [_view_auto()],
@@ -339,18 +266,8 @@ def _config_for(kind: str) -> dict[str, Any]:
     return {"views": views.get(kind, [_view_native()])}
 
 
-# ---------------------------------------------------------------------------
-# Storage (dashboard visible dans la barre latérale)
-# ---------------------------------------------------------------------------
-
-
-async def async_create_storage_dashboard(
-    hass: HomeAssistant, kind: str
-) -> bool:
-    """Crée (ou met à jour) un dashboard en mode storage.
-
-    Retourne True si le dashboard a été créé / mis à jour.
-    """
+async def async_create_storage_dashboard(hass: HomeAssistant, kind: str) -> bool:
+    """Crée ou met à jour un dashboard storage (éditable dans l\'UI HA)."""
     url_path = STORAGE_PATHS.get(kind)
     if not url_path:
         return False
@@ -359,7 +276,6 @@ async def async_create_storage_dashboard(
     icon = STORAGE_ICONS[kind]
     config = _config_for(kind)
 
-    # 1) Enregistrement dans la liste des dashboards
     dashboards_store: Store = Store(hass, 1, "lovelace_dashboards")
     data = await dashboards_store.async_load() or {}
     items: list[dict[str, Any]] = list(data.get("items") or [])
@@ -381,7 +297,6 @@ async def async_create_storage_dashboard(
     data["items"] = items
     await dashboards_store.async_save(data)
 
-    # 2) Contenu du dashboard
     config_store: Store = Store(hass, 1, f"lovelace.{url_path}")
     await config_store.async_save(config)
 
@@ -389,10 +304,7 @@ async def async_create_storage_dashboard(
     return True
 
 
-async def async_remove_storage_dashboard(
-    hass: HomeAssistant, kind: str
-) -> None:
-    """Retire un dashboard storage (optionnel)."""
+async def async_remove_storage_dashboard(hass: HomeAssistant, kind: str) -> None:
     url_path = STORAGE_PATHS.get(kind)
     if not url_path:
         return
@@ -401,59 +313,6 @@ async def async_remove_storage_dashboard(
     items = [i for i in (data.get("items") or []) if i.get("url_path") != url_path]
     data["items"] = items
     await dashboards_store.async_save(data)
-
-
-# ---------------------------------------------------------------------------
-# Fichiers YAML (secours)
-# ---------------------------------------------------------------------------
-
-
-def _yaml_dump_view(config: dict[str, Any]) -> str:
-    """Sérialisation YAML minimale (sans dépendance PyYAML externe)."""
-    # On s'appuie sur une représentation simple pour les structures fixes.
-    import json
-
-    # Home Assistant accepte aussi le JSON dans certains contextes ;
-    # pour un vrai YAML lisible on génère à la main les parties critiques.
-    # Ici on produit un YAML via une astuce stable : json + indents commentés.
-    # Préférer laisser le storage mode comme chemin principal.
-    lines = [
-        "# Generated by Bbox Bouygues integration",
-        "# Prefer the storage dashboard (sidebar). This file is a fallback.",
-        f"# Path in configuration.yaml: lovelace/dashboards → filename: lovelace/{YAML_FILES.get('native', 'bbox.yaml')}",
-        "",
-        "title: Bbox",
-        "views:",
-    ]
-    # Dump structure via JSON then note - for reliability use storage primarily.
-    # Provide a compact readable YAML for the native view only as fallback text.
-    for view in config.get("views", []):
-        lines.append(f"  - title: {view.get('title', 'Appareils')}")
-        lines.append(f"    path: {view.get('path', 'bbox')}")
-        lines.append(f"    icon: {view.get('icon', 'mdi:router-wireless')}")
-        lines.append("    cards:")
-        for card in view.get("cards", []):
-            ctype = card.get("type", "entities")
-            lines.append(f"      - type: {ctype}")
-            if "title" in card:
-                lines.append(f"        title: \"{card['title']}\"")
-            if ctype == "entities" and "entities" in card:
-                lines.append("        show_header_toggle: false")
-                lines.append("        entities:")
-                for ent in card["entities"]:
-                    lines.append(f"          - {ent}")
-            elif ctype == "markdown" and "content" in card:
-                content = str(card["content"]).replace("\n", "\\n")
-                lines.append(f"        content: \"{content}\"")
-            else:
-                # Cartes custom : on indique le JSON pour copie manuelle
-                lines.append(
-                    "        # custom card — use the storage dashboard for full support"
-                )
-                lines.append(
-                    f"        # {json.dumps(card, ensure_ascii=False)[:120]}…"
-                )
-    return "\n".join(lines) + "\n"
 
 
 def _write_yaml_file(path: str, content: str) -> bool:
@@ -471,9 +330,11 @@ def _write_yaml_file(path: str, content: str) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# API publique
-# ---------------------------------------------------------------------------
+def _yaml_fallback(kind: str) -> str:
+    return (
+        f"# Fallback YAML for {kind} — prefer the storage dashboard in the sidebar.\\n"
+        f"# Recreate via: Developer tools → Services → bbox_4g.create_dashboard\\n"
+    )
 
 
 async def async_setup_selected_dashboards(
@@ -482,10 +343,7 @@ async def async_setup_selected_dashboards(
     *,
     notify: bool = True,
 ) -> list[str]:
-    """Crée les dashboards demandés (storage + YAML de secours).
-
-    Retourne la liste des url_path créés.
-    """
+    """Crée les dashboards demandés (storage éditable + YAML de secours)."""
     created: list[str] = []
     for kind in selected:
         if kind not in STORAGE_PATHS:
@@ -494,31 +352,31 @@ async def async_setup_selected_dashboards(
             ok = await async_create_storage_dashboard(hass, kind)
             if ok:
                 created.append(STORAGE_PATHS[kind])
-        except Exception as err:  # pragma: no cover
-            _LOGGER.exception("Failed to create storage dashboard %s: %s", kind, err)
+        except Exception:
+            _LOGGER.exception("Failed to create storage dashboard %s", kind)
 
-        # YAML de secours
         yaml_name = YAML_FILES.get(kind)
         if yaml_name:
             path = hass.config.path("lovelace", yaml_name)
-            content = _yaml_dump_view(_config_for(kind))
-            await hass.async_add_executor_job(_write_yaml_file, path, content)
+            await hass.async_add_executor_job(
+                _write_yaml_file, path, _yaml_fallback(kind)
+            )
 
     if notify and created:
         paths = ", ".join(f"`/{p}`" for p in created)
         hass.components.persistent_notification.async_create(
             (
-                f"**Bbox dashboards ready**\n\n"
-                f"Created / updated: {paths}\n\n"
-                f"They appear in the sidebar after a **refresh of the page** "
-                f"(or a restart of Home Assistant).\n\n"
-                f"- **auto** / **mushroom** require the HACS cards "
-                f"*auto-entities* and/or *Mushroom*.\n"
-                f"- You can change the selection anytime in "
-                f"*Configure integration → Dashboards*."
+                f"**Bbox dashboards ready**\\n\\n"
+                f"Created / updated: {paths}\\n\\n"
+                f"1. **Restart Home Assistant** (required once after creation)\\n"
+                f"2. Open the dashboard from the sidebar\\n"
+                f"3. You can edit it like any other dashboard "
+                f"(⋮ → Edit dashboard)\\n\\n"
+                f"Variants **auto** / **mushroom** need HACS cards "
+                f"*auto-entities* and/or *Mushroom*."
             ),
             title="Bbox Bouygues",
-            notification_id=f"{DOMAIN}_dashboards",
+            notification_id="bbox_4g_dashboards",
         )
 
     return created
@@ -527,12 +385,5 @@ async def async_setup_selected_dashboards(
 async def async_write_dashboard(
     hass: HomeAssistant, devices: list[dict[str, Any]]
 ) -> bool:
-    """Compatibilité avec l’ancien appel du coordinator.
-
-    Ne régénère les dashboards que si des types sont sélectionnés dans les
-    options de **n’importe quelle** entrée Bbox.
-    """
-    # Le coordinator appelle encore cette fonction : on ne fait rien de
-    # dynamique ici (les dashboards storage ne dépendent plus de la liste
-    # d’appareils). On retourne False pour signaler « pas d’écriture ».
+    """Compatibilité coordinator : no-op (dashboards gérés à la demande)."""
     return False
