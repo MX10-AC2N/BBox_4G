@@ -4,6 +4,7 @@
   "codeowners": ["@MX10-AC2N"],
   "config_flow": true,
   "dependencies": [],
+  "after_dependencies": ["lovelace"],
   "documentation": "https://github.com/MX10-AC2N/BBox_4G",
   "integration_type": "hub",
   "iot_class": "local_polling",
