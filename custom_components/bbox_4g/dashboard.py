@@ -16,16 +16,13 @@ import os
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
 from .const import (
     DASHBOARD_AUTO,
     DASHBOARD_MUSHROOM,
     DASHBOARD_NATIVE,
-    DOMAIN,
 )
-from .helpers import slugify
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,8 +42,8 @@ STORAGE_PATHS = {
 
 STORAGE_TITLES = {
     DASHBOARD_NATIVE: "Bbox",
-    DASHBOARD_AUTO: "Bbox",
-    DASHBOARD_MUSHROOM: "Bbox",
+    DASHBOARD_AUTO: "Bbox (auto)",
+    DASHBOARD_MUSHROOM: "Bbox (Mushroom)",
 }
 
 STORAGE_ICONS = {
@@ -65,8 +62,6 @@ ENTITES_BOX = [
     "button.bbox_actualiser",
     "button.bbox_reconnecter",
 ]
-
-_LOGGER = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
