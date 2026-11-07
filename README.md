@@ -3,6 +3,8 @@
 Intégration personnalisée (HACS) pour les box Bouygues Telecom : voir **qui est connecté**,
 **couper le Wi-Fi** et **bloquer un appareil**, en local, sans cloud ni dépendance Python.
 
+[Charger l’image](https://github.com/MX10-AC2N/BBox_4G/actions/workflows/validate.yml)
+
 > ⚠️ **État du projet** : développé et testé sur une **Huawei B528s (Bbox 4G)**.
 > Le support des Bbox Sagemcom (fibre/ADSL) est présent dans le code mais **non testé** sur du matériel réel.
 > Le blocage par filtre MAC modifie la configuration du routeur : essayez d'abord sur un appareil sans importance.
