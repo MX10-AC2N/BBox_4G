@@ -6,19 +6,17 @@ référencés une fois dans l'interface de Home Assistant
 
 Trois variantes sont proposées :
 
-* ``bbox.yaml``       — cartes natives (aucune carte communautaire) ;
-* ``bbox-auto.yaml``  — carte communautaire « auto-entities » (liste
-  entièrement dynamique) ;
+* ``bbox.yaml``         — cartes natives (aucune carte communautaire) ;
+* ``bbox-auto.yaml``    — carte communautaire « auto-entities » (liste
+  entièrement dynamique, recommandée) ;
 * ``bbox-mushroom.yaml`` — cartes Mushroom (rendu soigné).
 
 L'écriture automatique dans ``/config/lovelace/`` est **facultative** : elle
-est désactivée par défaut (une intégration ne doit pas modifier les
-tableaux de bord de l'utilisateur sans son accord). Activez l'option
-« Écrire les tableaux de bord » si vous le souhaitez.
+est désactivée par défaut. Activez l'option « Écrire les tableaux de bord »
+dans les options de l'intégration.
 
-Les ``entity_id`` repris dans les cartes sont ceux **réellement enregistrés**
-par Home Assistant : ils sont lus dans le registre des entités, et non
-recalculés, ce qui évite les décalages après un renommage d'appareil.
+Les ``entity_id`` repris dans les cartes natives sont ceux **réellement
+enregistrés** par Home Assistant (lus dans le registre des entités).
 """
 
 from __future__ import annotations
@@ -36,18 +34,24 @@ from .helpers import slugify
 _LOGGER = logging.getLogger(__name__)
 
 DASHBOARD_FILE = "bbox.yaml"
-#: Second tableau de bord, basé sur la carte communautaire « auto-entities »
-#: (liste entièrement dynamique, sans déclaration d'entités à maintenir).
 DASHBOARD_COMMUNAUTAIRE = "bbox-auto.yaml"
-#: Troisième tableau de bord, en cartes Mushroom (rendu soigné).
 DASHBOARD_MUSHROOM = "bbox-mushroom.yaml"
 
-ENTETE = """# Tableau de bord « Bbox » — généré par l'intégration « Bbox Bouygues ».
-# Ce fichier est un mode YAML : référencez-le une fois depuis
-# Paramètres → Tableaux de bord → Ajouter → Vue YAML.
+ENTETE = """# Tableau de bord « Bbox » — généré par l'intégration Bbox Bouygues.
+# Ce fichier est une vue YAML.
+#
+# Comment l'ajouter dans Home Assistant :
+#   1. Paramètres → Tableaux de bord → Ajouter un tableau de bord
+#   2. Choisir « Vue YAML »
+#   3. Indiquer le fichier : /config/lovelace/bbox.yaml
+#      (ou bbox-auto.yaml / bbox-mushroom.yaml)
+#
+# Prérequis optionnels :
+#   - bbox-auto.yaml     → carte « auto-entities » (HACS)
+#   - bbox-mushroom.yaml → cartes « Mushroom » (HACS)
 """
 
-#: Entités de la box (indépendantes des appareils).
+#: Entités de la box (indépendantes des appareils clients).
 ENTITES_BOX = [
     "switch.bbox_wifi",
     "switch.bbox_wifi_24_ghz",
@@ -55,6 +59,8 @@ ENTITES_BOX = [
     "sensor.bbox_clients_connectes",
     "sensor.bbox_appareils_connus",
     "sensor.bbox_reseau_invite",
+    "button.bbox_actualiser",
+    "button.bbox_reconnecter",
 ]
 
 
@@ -77,16 +83,11 @@ def _entity_id(
     unique_id: str,
     repli: str,
 ) -> str:
-    """``entity_id`` réel d'une entité, lu dans le registre.
-
-    Le registre fait foi : si l'appareil a été renommé, l'``entity_id``
-    reste celui qui a été attribué à la création — c'est exactement ce que
-    référence une carte.
-    """
+    """``entity_id`` réel d'une entité, lu dans le registre."""
     if hass is not None:
         try:
             trouve = er.async_get(hass).async_get_entity_id(domain, DOMAIN, unique_id)
-        except Exception:  # pragma: no cover - registre indisponible
+        except Exception:  # pragma: no cover
             trouve = None
         if trouve:
             return trouve
@@ -96,11 +97,7 @@ def _entity_id(
 def _ids_appareils(
     hass: HomeAssistant | None, devices: list[dict[str, Any]]
 ) -> dict[str, dict[str, str]]:
-    """Identifiants des entités de chaque appareil.
-
-    Retourne, pour chaque MAC : ``acces_internet``, ``wifi`` (uniquement
-    pour les appareils Wi-Fi), ``connexion`` et ``presence``.
-    """
+    """Identifiants des entités de chaque appareil."""
     resultat: dict[str, dict[str, str]] = {}
     for device in devices:
         mac = str(device.get("mac", "")).lower()
@@ -109,69 +106,46 @@ def _ids_appareils(
         slug = _slug(device)
         entrees = {
             "acces_internet": _entity_id(
-                hass,
-                "switch",
-                f"internet_{mac}",
-                f"switch.{slug}_acces_internet",
+                hass, "switch", f"internet_{mac}", f"switch.bbox_acces_internet_{slug}"
             ),
             "connexion": _entity_id(
-                hass, "switch", f"device_{mac}", f"switch.{slug}_connexion"
+                hass, "switch", f"device_{mac}", f"switch.bbox_connexion_{slug}"
             ),
             "presence": _entity_id(
                 hass,
                 "binary_sensor",
                 f"presence_{mac}",
-                f"binary_sensor.{slug}_presence",
+                f"binary_sensor.bbox_presence_{slug}",
+            ),
+            "separate": _entity_id(
+                hass,
+                "switch",
+                f"separate_{mac}",
+                f"switch.bbox_appareil_independant_{slug}",
             ),
         }
         if _est_wifi(device):
             entrees["wifi"] = _entity_id(
-                hass, "switch", f"wifi_device_{mac}", f"switch.{slug}_wifi"
+                hass, "switch", f"wifi_device_{mac}", f"switch.bbox_wifi_{slug}"
             )
         resultat[mac] = entrees
     return resultat
 
 
-def _entrees(
-    ids: dict[str, dict[str, str]], etat: str | None
-) -> list[str]:
-    """Une entrée par appareil, filtrée sur son capteur de présence.
-
-    Chaque appareil offre deux interrupteurs : « Accès Internet » (qui
-    marche aussi pour les appareils filaires) et « Wi-Fi » (uniquement pour
-    ceux qui sont rattachés à un réseau Wi-Fi). C'est le capteur de
-    présence qui décide dans quelle carte l'appareil apparaît.
-    """
-    lignes: list[str] = []
-    for mac, entrees in ids.items():
-        interrupteurs = [entrees["acces_internet"]]
-        if "wifi" in entrees:
-            interrupteurs.append(entrees["wifi"])
-        presence = entrees["presence"]
-        for entity in interrupteurs:
-            lignes.append(f"          - entity: {entity}")
-            if etat is None:
-                continue
-            lignes.append("            conditions:")
-            lignes.append("              - condition: state")
-            lignes.append(f"                entity_id: {presence}")
-            lignes.append(f'                state: "{etat}"')
-    return lignes
-
-
-def _entrees_avancees(ids: dict[str, dict[str, str]]) -> list[str]:
-    """Les interrupteurs « connexion » historiques (portée globale)."""
+def _section_header(title: str, icon: str = "mdi:router-wireless") -> list[str]:
     return [
-        f"          - entity: {entrees['connexion']}"
-        for entrees in ids.values()
+        "      - type: heading",
+        f'        heading: "{title}"',
+        f"        icon: {icon}",
     ]
 
 
 def render(
     devices: list[dict[str, Any]], hass: HomeAssistant | None = None
 ) -> str:
-    """Construit le YAML du tableau de bord à partir des appareils connus."""
+    """Tableau de bord natif (aucune carte communautaire requise)."""
     ids = _ids_appareils(hass, devices)
+
     lignes = [
         ENTETE,
         "title: Bbox",
@@ -180,54 +154,284 @@ def render(
         "    path: bbox",
         "    icon: mdi:router-wireless",
         "    cards:",
+        # --- État global de la box ---
+        "      - type: entities",
+        '        title: "État de la box"',
+        "        show_header_toggle: false",
+        "        entities:",
+    ]
+    for entite in ENTITES_BOX:
+        lignes.append(f"          - entity: {entite}")
+
+    # --- Appareils connectés ---
+    lignes += [
         "      - type: entity-filter",
-        '        title: "Appareils connectés (filaire + Wi-Fi)"',
-        "        icon: mdi:wifi",
+        '        title: "Appareils connectés"',
+        "        icon: mdi:lan-connect",
+        "        show_empty: true",
         "        card:",
         "          type: entities",
         "          show_header_toggle: false",
         "        entities:",
     ]
-    lignes += _entrees(ids, "on")
+    for entrees in ids.values():
+        lignes.append(f"          - entity: {entrees['presence']}")
+        lignes.append("            conditions:")
+        lignes.append("              - condition: state")
+        lignes.append(f"                entity_id: {entrees['presence']}")
+        lignes.append('                state: "on"')
+        lignes.append(f"          - entity: {entrees['acces_internet']}")
+        lignes.append("            conditions:")
+        lignes.append("              - condition: state")
+        lignes.append(f"                entity_id: {entrees['presence']}")
+        lignes.append('                state: "on"')
+        if "wifi" in entrees:
+            lignes.append(f"          - entity: {entrees['wifi']}")
+            lignes.append("            conditions:")
+            lignes.append("              - condition: state")
+            lignes.append(f"                entity_id: {entrees['presence']}")
+            lignes.append('                state: "on"')
+
+    # --- Appareils déconnectés ---
     lignes += [
         "      - type: entity-filter",
         '        title: "Appareils déconnectés"',
-        "        icon: mdi:wifi-off",
+        "        icon: mdi:lan-disconnect",
+        "        show_empty: true",
         "        card:",
         "          type: entities",
         "          show_header_toggle: false",
         "        entities:",
     ]
-    lignes += _entrees(ids, "off")
-    lignes += [
-        "      - type: entity-filter",
-        '        title: "Bloqués par la box"',
-        "        icon: mdi:account-cancel",
-        "        state_filter:",
-        "          - attribute: bloque",
-        "            value: true",
-        "        card:",
-        "          type: entities",
-        "          show_header_toggle: false",
-        "        entities:",
-    ]
-    lignes += [
-        f"          - entity: {entrees['acces_internet']}"
-        for entrees in ids.values()
-    ]
-    lignes += [
-        "      - type: entities",
-        '        title: "Wi-Fi de la box"',
-        "        entities:",
-    ]
-    lignes += [f"          - entity: {entite}" for entite in ENTITES_BOX]
-    lignes += [
-        "      - type: entities",
-        '        title: "Interrupteur global (portée de l\'option)"',
-        "        entities:",
-    ]
-    lignes += _entrees_avancees(ids)
+    for entrees in ids.values():
+        lignes.append(f"          - entity: {entrees['presence']}")
+        lignes.append("            conditions:")
+        lignes.append("              - condition: state")
+        lignes.append(f"                entity_id: {entrees['presence']}")
+        lignes.append('                state: "off"')
+        lignes.append(f"          - entity: {entrees['acces_internet']}")
+        lignes.append("            conditions:")
+        lignes.append("              - condition: state")
+        lignes.append(f"                entity_id: {entrees['presence']}")
+        lignes.append('                state: "off"')
+
     return "\n".join(lignes) + "\n"
+
+
+def render_communautaire() -> str:
+    """Tableau de bord dynamique basé sur auto-entities (recommandé)."""
+    lignes = [
+        ENTETE.replace("bbox.yaml", "bbox-auto.yaml"),
+        "title: Bbox (auto-entities)",
+        "views:",
+        "  - title: Appareils",
+        "    path: bbox-auto",
+        "    icon: mdi:router-wireless",
+        "    cards:",
+        # --- En-tête box ---
+        "      - type: entities",
+        '        title: "État de la box"',
+        "        show_header_toggle: false",
+        "        entities:",
+    ]
+    for entite in ENTITES_BOX:
+        lignes.append(f"          - entity: {entite}")
+
+    # --- Connectés (dynamique) ---
+    lignes += [
+        "      - type: custom:auto-entities",
+        '        title: "Appareils connectés"',
+        "        show_empty: true",
+        "        card:",
+        "          type: entities",
+        "          show_header_toggle: false",
+        "        filter:",
+        "          include:",
+        "            - entity_id: binary_sensor.*",
+        "              attributes:",
+        "                device_class: connectivity",
+        '              state: "on"',
+        "            - entity_id: switch.*",
+        "              attributes:",
+        "                appareil: client",
+        '                etat_connexion: "connecte"',
+        "          exclude:",
+        "            - entity_id: switch.*appareil_independant*",
+        "            - entity_id: switch.*separate*",
+        "        sort:",
+        "          method: name",
+    ]
+
+    # --- Déconnectés ---
+    lignes += [
+        "      - type: custom:auto-entities",
+        '        title: "Appareils déconnectés"',
+        "        show_empty: true",
+        "        card:",
+        "          type: entities",
+        "          show_header_toggle: false",
+        "        filter:",
+        "          include:",
+        "            - entity_id: binary_sensor.*",
+        "              attributes:",
+        "                device_class: connectivity",
+        '              state: "off"',
+        "            - entity_id: switch.*",
+        "              attributes:",
+        "                appareil: client",
+        '                etat_connexion: "deconnecte"',
+        "          exclude:",
+        "            - entity_id: switch.*appareil_independant*",
+        "            - entity_id: switch.*separate*",
+        "        sort:",
+        "          method: name",
+    ]
+
+    # --- Accès Internet coupé ---
+    lignes += [
+        "      - type: custom:auto-entities",
+        '        title: "Accès Internet coupé"',
+        "        show_empty: true",
+        "        card:",
+        "          type: entities",
+        "          show_header_toggle: false",
+        "        filter:",
+        "          include:",
+        "            - entity_id: switch.*",
+        "              attributes:",
+        "                appareil: client",
+        '                acces: "coupe"',
+        "        sort:",
+        "          method: name",
+    ]
+
+    return "\n".join(lignes) + "\n"
+
+
+def render_mushroom() -> str:
+    """Tableau de bord Mushroom (rendu soigné + dynamique)."""
+    lignes = [
+        ENTETE.replace("bbox.yaml", "bbox-mushroom.yaml"),
+        "title: Bbox (Mushroom)",
+        "views:",
+        "  - title: Appareils",
+        "    path: bbox-mushroom",
+        "    icon: mdi:router-wireless",
+        "    cards:",
+        # --- Chips box ---
+        "      - type: custom:mushroom-chips-card",
+        "        chips:",
+        "          - type: entity",
+        "            entity: sensor.bbox_clients_connectes",
+        "            icon_color: blue",
+        "          - type: entity",
+        "            entity: switch.bbox_wifi",
+        "            icon_color: blue",
+        "          - type: entity",
+        "            entity: switch.bbox_wifi_24_ghz",
+        "            icon_color: blue",
+        "          - type: entity",
+        "            entity: switch.bbox_wifi_5_ghz",
+        "            icon_color: blue",
+        "          - type: entity",
+        "            entity: button.bbox_actualiser",
+        "            icon: mdi:refresh",
+        # --- Résumé ---
+        "      - type: custom:mushroom-template-card",
+        "        icon: mdi:router-wireless",
+        "        icon_color: blue",
+        "        primary: >",
+        "          {% set n = states('sensor.bbox_clients_connectes') | int(0) %}",
+        "          {{ n }} appareil(s) connecté(s)",
+        "        secondary: Bbox Bouygues",
+        # --- Connectés ---
+        "      - type: heading",
+        '        heading: "Connectés"',
+        "        icon: mdi:lan-connect",
+        "      - type: custom:auto-entities",
+        "        show_empty: true",
+        "        card:",
+        "          type: grid",
+        "          columns: 1",
+        "          square: false",
+        "        card_param: cards",
+        "        filter:",
+        "          include:",
+        "            - entity_id: switch.*",
+        "              attributes:",
+        "                appareil: client",
+        '                etat_connexion: "connecte"',
+        "          exclude:",
+        "            - entity_id: switch.*appareil_independant*",
+        "            - entity_id: switch.*separate*",
+        "        options:",
+        "          type: custom:mushroom-entity-card",
+        "          fill_container: true",
+        "          icon_color: green",
+        "        sort:",
+        "          method: name",
+        # --- Déconnectés ---
+        "      - type: heading",
+        '        heading: "Déconnectés"',
+        "        icon: mdi:lan-disconnect",
+        "      - type: custom:auto-entities",
+        "        show_empty: true",
+        "        card:",
+        "          type: grid",
+        "          columns: 1",
+        "          square: false",
+        "        card_param: cards",
+        "        filter:",
+        "          include:",
+        "            - entity_id: switch.*",
+        "              attributes:",
+        "                appareil: client",
+        '                etat_connexion: "deconnecte"',
+        "          exclude:",
+        "            - entity_id: switch.*appareil_independant*",
+        "            - entity_id: switch.*separate*",
+        "        options:",
+        "          type: custom:mushroom-entity-card",
+        "          fill_container: true",
+        "          icon_color: grey",
+        "        sort:",
+        "          method: name",
+        # --- Accès coupé ---
+        "      - type: heading",
+        '        heading: "Accès Internet coupé"',
+        "        icon: mdi:web-off",
+        "      - type: custom:auto-entities",
+        "        show_empty: true",
+        "        card:",
+        "          type: grid",
+        "          columns: 1",
+        "          square: false",
+        "        card_param: cards",
+        "        filter:",
+        "          include:",
+        "            - entity_id: switch.*",
+        "              attributes:",
+        "                appareil: client",
+        '                acces: "coupe"',
+        "        options:",
+        "          type: custom:mushroom-entity-card",
+        "          fill_container: true",
+        "          icon_color: red",
+        "        sort:",
+        "          method: name",
+    ]
+    return "\n".join(lignes) + "\n"
+
+
+def render_all(
+    devices: list[dict[str, Any]], hass: HomeAssistant | None = None
+) -> dict[str, str]:
+    """Contenu des trois tableaux de bord."""
+    return {
+        DASHBOARD_FILE: render(devices, hass),
+        DASHBOARD_COMMUNAUTAIRE: render_communautaire(),
+        DASHBOARD_MUSHROOM: render_mushroom(),
+    }
 
 
 def _write(path: str, contenu: str) -> bool:
@@ -243,149 +447,10 @@ def _write(path: str, contenu: str) -> bool:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(contenu)
-    except OSError as err:  # pragma: no cover - droits d'écriture
+    except OSError as err:  # pragma: no cover
         _LOGGER.warning("Unable to write the dashboard: %s", err)
         return False
     return True
-
-
-def _filtres_auto(attribut: str, valeur: str) -> list[str]:
-    """Filtres « auto-entities » sur les interrupteurs d'appareil.
-
-    On filtre sur l'attribut ``appareil`` (présent uniquement sur les
-    interrupteurs d'un appareil) plutôt que sur le nom de l'entité : les
-    identifiants changent quand un appareil est renommé, l'attribut non.
-    """
-    return [
-        "        filter:",
-        "          include:",
-        "            - entity_id: switch.*",
-        "              attributes:",
-        "                appareil: client",
-        f"                {attribut}: \"{valeur}\"",
-    ]
-
-
-def render_communautaire() -> str:
-    """Tableau de bord basé sur la carte communautaire « auto-entities »."""
-    lignes = [
-        ENTETE.replace("Tableau de bord « Bbox »", "Tableau de bord « Bbox » (auto-entities)"),
-        "title: Bbox (auto-entities)",
-        "views:",
-        "  - title: Appareils",
-        "    path: bbox-auto",
-        "    icon: mdi:router-wireless",
-        "    cards:",
-        "      - type: custom:auto-entities",
-        '        title: "Appareils connectés (filaire + Wi-Fi)"',
-        "        show_empty: true",
-        "        card:",
-        "          type: entities",
-        "          show_header_toggle: false",
-    ]
-    lignes += _filtres_auto("etat_connexion", "connecte")
-    lignes += [
-        "      - type: custom:auto-entities",
-        '        title: "Appareils déconnectés"',
-        "        show_empty: true",
-        "        card:",
-        "          type: entities",
-        "          show_header_toggle: false",
-    ]
-    lignes += _filtres_auto("etat_connexion", "deconnecte")
-    lignes += [
-        "      - type: custom:auto-entities",
-        '        title: "Accès coupé"',
-        "        show_empty: true",
-        "        card:",
-        "          type: entities",
-        "          show_header_toggle: false",
-    ]
-    lignes += _filtres_auto("acces", "coupe")
-    lignes += [
-        "      - type: entities",
-        '        title: "Wi-Fi de la box"',
-        "        entities:",
-    ]
-    lignes += [f"          - entity: {entite}" for entite in ENTITES_BOX]
-    return "\n".join(lignes) + "\n"
-
-
-def _carte_mushroom(titre: str, attribut: str, valeur: str, icone: str) -> list[str]:
-    """Une carte « Mushroom » listant les appareils selon un attribut."""
-    return [
-        "      - type: custom:auto-entities",
-        f'        title: "{titre}"',
-        "        show_empty: true",
-        "        card:",
-        "          type: grid",
-        "          columns: 1",
-        "          square: false",
-        "        card_param: cards",
-    ] + _filtres_auto(attribut, valeur) + [
-        "        options:",
-        "          type: custom:mushroom-entity-card",
-        "          fill_container: true",
-        f"          icon_color: {icone}",
-    ]
-
-
-def render_mushroom() -> str:
-    """Tableau de bord en cartes Mushroom (rendu soigné, dynamique)."""
-    lignes = [
-        ENTETE.replace("Tableau de bord « Bbox »", "Tableau de bord « Bbox » (Mushroom)"),
-        "title: Bbox (Mushroom)",
-        "views:",
-        "  - title: Appareils",
-        "    path: bbox-mushroom",
-        "    icon: mdi:router-wireless",
-        "    cards:",
-    ]
-    lignes += _carte_mushroom(
-        "Connectés (filaire + Wi-Fi)", "etat_connexion", "connecte", "green"
-    )
-    lignes += _carte_mushroom("Déconnectés", "etat_connexion", "deconnecte", "grey")
-    lignes += _carte_mushroom("Accès coupé", "acces", "coupe", "red")
-    lignes += [
-        # La carte « chips » n'accepte pas de titre : on met un en-tête
-        # natif à côté.
-        "      - type: heading",
-        '        heading: "Wi-Fi de la box"',
-        "        icon: mdi:wifi",
-        "      - type: custom:mushroom-chips-card",
-        "        chips:",
-        "          - type: entity",
-        "            entity: switch.bbox_wifi",
-        "            icon_color: blue",
-        "          - type: entity",
-        "            entity: switch.bbox_wifi_24_ghz",
-        "            icon_color: blue",
-        "          - type: entity",
-        "            entity: switch.bbox_wifi_5_ghz",
-        "            icon_color: blue",
-        "          - type: back",
-        "            icon: mdi:close",
-        # La carte « template » attend ``primary`` / ``secondary``
-        # (et non ``content``).
-        "      - type: custom:mushroom-template-card",
-        "        icon: mdi:router-wireless",
-        "        primary: >",
-        "          {% set total = states('sensor.bbox_clients_connectes') | int(0) %}",
-        "          **{{ total }}** appareil(s) connecté(s)",
-        "        secondary: Appuyez sur un interrupteur pour couper l'accès.",
-    ]
-    return "\n".join(lignes) + "\n"
-
-
-def render_all(
-    devices: list[dict[str, Any]], hass: HomeAssistant | None = None
-) -> dict[str, str]:
-    """Contenu des trois tableaux de bord."""
-    return {
-        DASHBOARD_FILE: render(devices, hass),
-        DASHBOARD_COMMUNAUTAIRE: render_communautaire(),
-        DASHBOARD_MUSHROOM: render_mushroom(),
-    }
 
 
 async def async_write_dashboard(
