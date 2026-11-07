@@ -28,7 +28,7 @@ Use the **IP address**: `mabbox.bytel.fr` often does not resolve from inside a c
 
 ## Entities
 
-**The router**
+**The router (device « Bbox »)**
 
 | Entity | Purpose |
 |---|---|
@@ -37,19 +37,19 @@ Use the **IP address**: `mabbox.bytel.fr` often does not resolve from inside a c
 | `switch.bbox_wifi`, `…_24_ghz`, `…_5_ghz` | Wi-Fi (both bands / per band) |
 | `button.bbox_actualiser`, `button.bbox_reconnecter` | force a refresh / reopen the admin session |
 
-**Each known device** is created as a Home Assistant device (identified by its MAC address):
+**Each known client** creates entities on the Bbox (default) or on its own device:
 
 | Entity | Purpose |
 |---|---|
-| `device_tracker.<device>_suivi` | presence (usable by *People* and *Zones*) |
-| `binary_sensor.<device>_presence` | connected / disconnected |
-| `switch.<device>_acces_internet` | cuts the device's Internet output (MAC filter) |
-| `switch.<device>_wifi` | allows / denies the device on Wi-Fi (SSID black list) |
-| `switch.<device>_connexion` | blocking according to the **scope** set in the options |
-| `button.<device>_reveiller` | Wake-on-LAN |
+| Presence / Suivi | connected / disconnected (`binary_sensor` + `device_tracker`) |
+| Accès Internet | cuts the device's Internet output (MAC filter) |
+| Wifi | allows / denies the device on Wi-Fi (SSID black list) |
+| Connexion | blocking according to the **scope** set in the options |
+| Réveiller | Wake-on-LAN |
+| Appareil indépendant | move the client to its own Home Assistant device |
 
-> Entity names are currently in French (this is why IDs look like `…_acces_internet`).
-> Entities of a device that has disappeared from the router for several polls are removed automatically.
+In default **under_box** mode, entity names include the client name  
+(e.g. `Presence – iPhone`, `Accès Internet – NAS`) so they stay readable under the single Bbox device.
 
 ## Options
 
@@ -59,7 +59,30 @@ Use the **IP address**: `mabbox.bytel.fr` often does not resolve from inside a c
 |---|---|---|
 | Polling interval | 60 s | delay between two reads of the router (15–600 s) |
 | Device blocking scope | `lan` | `lan` MAC filter · `wifi` SSID black list · `internet` · `all` |
-| Write the dashboards | off | generates Lovelace YAML files in `/config/lovelace/` |
+| Default device mode | `under_box` | `under_box` = all clients under Bbox · `separate` = one HA device per client |
+| Dashboards | (none) | select **Native** / **Auto-entities** / **Mushroom** to create them in the sidebar |
+
+## Dashboards (optional)
+
+1. **Configure** the integration → select one or more dashboards → save  
+2. **Refresh the browser** (or restart Home Assistant)  
+3. The dashboard appears in the sidebar
+
+| Variant | Requirements |
+|---|---|
+| **Native** | none |
+| **Auto-entities** | HACS frontend card *auto-entities* |
+| **Mushroom** | HACS *Mushroom* + *auto-entities* |
+
+You can also call:
+
+```yaml
+action: bbox_4g.create_dashboard
+data:
+  dashboards:
+    - auto
+    - mushroom
+```
 
 ## Services
 
@@ -71,6 +94,7 @@ Use the **IP address**: `mabbox.bytel.fr` often does not resolve from inside a c
 | `bbox_4g.set_internet_access` | `mac`, `allowed` |
 | `bbox_4g.set_wifi_access` | `mac`, `allowed` |
 | `bbox_4g.wake_device` | `mac` |
+| `bbox_4g.create_dashboard` | `dashboards` (`native`, `auto`, `mushroom`) |
 
 ```yaml
 action: bbox_4g.block_device
@@ -85,21 +109,6 @@ data:
 - **MAC filter in allow-list mode**: if the router uses an allow-list ("white list") with authorised devices, the integration refuses to block so it does not cut Internet for everyone.
 - **TLS certificate**: self-signed and not verified by default (usual behaviour for Bouygues routers).
 
-## Dashboards (optional)
-
-1. **Settings → Devices & services → Bbox Bouygues → Configure**
-2. Enable **Write the dashboards** and save  
-   → three files are written to `/config/lovelace/` :
-   - `bbox.yaml` (native cards)
-   - `bbox-auto.yaml` (dynamic, requires *auto-entities*)
-   - `bbox-mushroom.yaml` (requires *Mushroom* + *auto-entities*)
-
-3. **Settings → Dashboards → Add dashboard → YAML view**
-4. Point to one of the files, e.g. `/config/lovelace/bbox-auto.yaml`
-
-**Recommended:** `bbox-auto.yaml` or `bbox-mushroom.yaml`  
-Install the required cards from HACS → Frontend if needed.
-
 ## Troubleshooting
 
 | Symptom | Hint |
@@ -107,6 +116,7 @@ Install the required cards from HACS → Frontend if needed.
 | "Unable to reach the router" | check the IP, that Home Assistant is on the same network as the router, and that no web session is open |
 | "Credentials rejected" | use the router **admin** password; the router locks the account after several attempts |
 | Entities "unavailable" | close the router web interface, then press **Reconnect** |
+| Dashboard not in sidebar | refresh the browser or restart HA after selecting dashboards in options |
 | Logs | `docker logs homeassistant \| grep -i bbox` |
 
 ## Diagnostic tool (optional)

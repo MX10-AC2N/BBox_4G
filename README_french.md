@@ -2,8 +2,6 @@
 
 🇬🇧 [English version](README.md)
 
-[![Validate](https://github.com/MX10-AC2N/BBox_4G/actions/workflows/validate.yml/badge.svg)](https://github.com/MX10-AC2N/BBox_4G/actions/workflows/validate.yml)
-
 Intégration personnalisée (HACS) pour les box Bouygues Telecom : voir **qui est connecté**,
 **couper le Wi-Fi** et **bloquer un appareil**, en local, sans cloud ni dépendance Python.
 
@@ -28,7 +26,7 @@ Utilisez l'**adresse IP** : `mabbox.bytel.fr` ne se résout pas toujours depuis 
 
 ## Entités
 
-**La box**
+**La box (appareil « Bbox »)**
 
 | Entité | Rôle |
 |---|---|
@@ -37,18 +35,19 @@ Utilisez l'**adresse IP** : `mabbox.bytel.fr` ne se résout pas toujours depuis 
 | `switch.bbox_wifi`, `…_24_ghz`, `…_5_ghz` | Wi-Fi global et par bande |
 | `button.bbox_actualiser`, `button.bbox_reconnecter` | forcer une lecture / rouvrir la session |
 
-**Chaque appareil connu** est créé comme un appareil Home Assistant (identifié par sa MAC) :
+**Chaque client connu** crée des entités sous la Bbox (par défaut) ou sur son propre appareil :
 
 | Entité | Rôle |
 |---|---|
-| `device_tracker.<appareil>_suivi` | présence (utilisable par *Personnes* et *Zones*) |
-| `binary_sensor.<appareil>_presence` | connecté / déconnecté |
-| `switch.<appareil>_acces_internet` | coupe la sortie Internet (filtre MAC) |
-| `switch.<appareil>_wifi` | autorise / refuse l'appareil sur le Wi-Fi (liste noire du SSID) |
-| `switch.<appareil>_connexion` | blocage selon la **portée** choisie dans les options |
-| `button.<appareil>_reveiller` | Wake-on-LAN |
+| Présence / Suivi | connecté / déconnecté (`binary_sensor` + `device_tracker`) |
+| Accès Internet | coupe la sortie Internet (filtre MAC) |
+| Wifi | autorise / refuse l'appareil sur le Wi-Fi (liste noire du SSID) |
+| Connexion | blocage selon la **portée** choisie dans les options |
+| Réveiller | Wake-on-LAN |
+| Appareil indépendant | déplace le client vers son propre appareil Home Assistant |
 
-Les entités d'un appareil disparu de la box pendant plusieurs lectures sont supprimées.
+En mode **under_box** (défaut), les noms d'entités incluent le nom du client  
+(ex. `Présence – iPhone`, `Accès Internet – NAS`) pour rester lisibles sous le seul appareil Bbox.
 
 ## Options
 
@@ -58,7 +57,30 @@ Les entités d'un appareil disparu de la box pendant plusieurs lectures sont sup
 |---|---|---|
 | Fréquence d'interrogation | 60 s | délai entre deux lectures (15–600 s) |
 | Portée du blocage | `lan` | `lan` filtre MAC · `wifi` liste noire du SSID · `internet` · `all` |
-| Écrire les tableaux de bord | non | génère des fichiers YAML Lovelace dans `/config/lovelace/` |
+| Mode d'appareils | `under_box` | `under_box` = tout sous la Bbox · `separate` = un appareil HA par client |
+| Tableaux de bord | (aucun) | cocher **Native** / **Auto-entities** / **Mushroom** pour les créer dans la barre latérale |
+
+## Tableaux de bord (optionnel)
+
+1. **Configurer** l'intégration → sélectionner un ou plusieurs tableaux de bord → enregistrer  
+2. **Rafraîchir le navigateur** (ou redémarrer Home Assistant)  
+3. Le tableau de bord apparaît dans la barre latérale
+
+| Variante | Prérequis |
+|---|---|
+| **Native** | aucun |
+| **Auto-entities** | carte HACS *auto-entities* |
+| **Mushroom** | HACS *Mushroom* + *auto-entities* |
+
+Ou via le service :
+
+```yaml
+action: bbox_4g.create_dashboard
+data:
+  dashboards:
+    - auto
+    - mushroom
+```
 
 ## Services
 
@@ -70,6 +92,7 @@ Les entités d'un appareil disparu de la box pendant plusieurs lectures sont sup
 | `bbox_4g.set_internet_access` | `mac`, `allowed` |
 | `bbox_4g.set_wifi_access` | `mac`, `allowed` |
 | `bbox_4g.wake_device` | `mac` |
+| `bbox_4g.create_dashboard` | `dashboards` (`native`, `auto`, `mushroom`) |
 
 ```yaml
 action: bbox_4g.block_device
@@ -84,21 +107,6 @@ data:
 - **Filtre MAC en liste blanche** : si la box est en politique « liste blanche » avec des appareils autorisés, l'intégration refuse de bloquer pour ne pas couper Internet à tous.
 - **Certificat TLS** : auto-signé, non vérifié par défaut (comportement habituel des box Bouygues).
 
-## Tableaux de bord (facultatif)
-
-1. **Paramètres → Appareils et services → Bbox Bouygues → Configurer**
-2. Activez l'option **Écrire les tableaux de bord** et enregistrez  
-   → trois fichiers sont créés dans le répertoire `/config/lovelace/` :
-   - `bbox.yaml` (cartes natives)
-   - `bbox-auto.yaml` (dynamique, nécessite *auto-entities*)
-   - `bbox-mushroom.yaml` (nécessite *Mushroom* + *auto-entities*)
-
-3. **Paramètres → Tableaux de bord → Ajouter un tableau de bord → Vue YAML**
-4. Sélectionnez l’un des fichiers, par exemple `/config/lovelace/bbox-auto.yaml`
-
-**Recommandé :** `bbox-auto.yaml` ou `bbox-mushroom.yaml`  
-Installez les cartes requises depuis HACS → Frontend si nécessaire.
-
 ## Dépannage
 
 | Symptôme | Piste |
@@ -106,6 +114,7 @@ Installez les cartes requises depuis HACS → Frontend si nécessaire.
 | « Impossible de joindre la box » | vérifier l'IP, que HA est sur le même réseau que la box, et qu'aucune session web n'est ouverte |
 | « Identifiants refusés » | mot de passe **admin** de la box ; la box verrouille le compte après plusieurs essais |
 | Entités « indisponibles » | fermer l'interface web de la box, puis **Reconnecter** |
+| Dashboard absent de la barre latérale | rafraîchir le navigateur ou redémarrer HA après avoir coché les dashboards dans les options |
 | Journaux | `docker logs homeassistant \| grep -i bbox` |
 
 ## Outil de diagnostic (facultatif)
