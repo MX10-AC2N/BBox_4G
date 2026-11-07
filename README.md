@@ -87,8 +87,18 @@ data:
 
 ## Dashboards (optional)
 
-With the "Write the dashboards" option, three files are created (`bbox.yaml` native, `bbox-auto.yaml` using *auto-entities*, `bbox-mushroom.yaml` using *Mushroom*).
-Add one with **Settings → Dashboards → Add dashboard → YAML view**.
+1. **Settings → Devices & services → Bbox Bouygues → Configure**
+2. Enable **Write the dashboards** and save  
+   → three files are written to `/config/lovelace/` :
+   - `bbox.yaml` (native cards)
+   - `bbox-auto.yaml` (dynamic, requires *auto-entities*)
+   - `bbox-mushroom.yaml` (requires *Mushroom* + *auto-entities*)
+
+3. **Settings → Dashboards → Add dashboard → YAML view**
+4. Point to one of the files, e.g. `/config/lovelace/bbox-auto.yaml`
+
+**Recommended:** `bbox-auto.yaml` or `bbox-mushroom.yaml`  
+Install the required cards from HACS → Frontend if needed.
 
 ## Troubleshooting
 
