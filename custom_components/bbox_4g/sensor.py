@@ -54,6 +54,7 @@ class BboxClientsSensor(_BboxSensor):
     """Nombre de clients actuellement connectés à la box."""
 
     _attr_name = "Clients connectés"
+    _attr_unique_id = "clients_connected"
     _attr_icon = "mdi:lan-connect"
 
     @property
@@ -78,6 +79,7 @@ class BboxKnownDevicesSensor(_BboxSensor):
     """Nombre d'appareils connus par la box (connectés ou non)."""
 
     _attr_name = "Appareils connus"
+    _attr_unique_id = "devices_known"
     _attr_icon = "mdi:devices"
 
     @property
@@ -91,6 +93,7 @@ class BboxGuestNetworkSensor(_BboxSensor):
     """État du réseau invité."""
 
     _attr_name = "Réseau invité"
+    _attr_unique_id = "guest_network"
     _attr_icon = "mdi:wifi"
 
     @property

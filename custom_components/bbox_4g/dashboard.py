@@ -1,11 +1,26 @@
-"""Tableaux de bord Lovelace — création via l'API Home Assistant.
+"""Lovelace dashboards for the Bbox integration.
 
-Les dashboards sont en mode **storage** : visibles dans la barre latérale
-et **éditables** depuis l'interface (⋮ → Edit dashboard).
+Three optional dashboards are generated (sidebar, editable from the UI):
 
-On privilégie l'API interne Lovelace (DashboardsCollection + LovelaceStorage)
-plutôt que d'écrire à la main dans ``.storage``, ce qui évite les configs
-incomplètes / non enregistrées auprès du frontend.
+* ``native``   – no custom card;
+* ``mushroom`` – needs the *Mushroom* cards;
+* ``auto``     – needs *auto-entities*; light list that follows new devices
+  on its own.
+
+``native`` and ``mushroom`` have the same layout, in three sections:
+
+1. **Router** – Wi-Fi, guest network, refresh…;
+2. **Connected** – every device currently online (wired or Wi-Fi) with its
+   local IP and *its own* switches (Internet, Wi-Fi, connection);
+3. **Blocked** – every device with a switch cut, to restore it quickly.
+
+Every device has one card per section; ``conditional`` cards show or hide it
+from the live state, so the layout is rewritten only when a device appears,
+disappears or is renamed. Entities are resolved through the entity registry
+(unique ids), never guessed from their name.
+
+A *new* dashboard needs one Home Assistant restart to show up in the
+sidebar; afterwards it is updated live.
 """
 
 from __future__ import annotations
@@ -13,18 +28,23 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 
 from .const import (
+    CONF_DASHBOARDS,
     DASHBOARD_AUTO,
     DASHBOARD_CHOICES,
     DASHBOARD_MUSHROOM,
     DASHBOARD_NATIVE,
+    DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# url_path DOIT contenir un tiret (règle HA récente pour les nouveaux dashboards)
+# url_path MUST contain a hyphen (Home Assistant rule for new dashboards)
 STORAGE_PATHS = {
     DASHBOARD_NATIVE: "bbox-native",
     DASHBOARD_AUTO: "bbox-auto",
@@ -40,169 +60,402 @@ STORAGE_TITLES = {
 STORAGE_ICONS = {
     DASHBOARD_NATIVE: "mdi:router-wireless",
     DASHBOARD_AUTO: "mdi:router-wireless",
-    DASHBOARD_MUSHROOM: "mdi:mushroom",
+    DASHBOARD_MUSHROOM: "mdi:router-wireless",
 }
 
-ENTITES_BOX = [
-    "sensor.bbox_clients_connectes",
-    "sensor.bbox_appareils_connus",
-    "sensor.bbox_reseau_invite",
-    "switch.bbox_wifi",
-    "switch.bbox_wifi_24_ghz",
-    "switch.bbox_wifi_5_ghz",
-    "button.bbox_actualiser",
-    "button.bbox_reconnecter",
-]
+# ---------------------------------------------------------------------------
+# Texts (French / English, chosen from the Home Assistant language)
+# ---------------------------------------------------------------------------
+
+_TEXTS: dict[str, dict[str, str]] = {
+    "fr": {
+        "box": "Box",
+        "connected": "Appareils connectés",
+        "blocked": "Appareils bloqués",
+        "wired": "Filaire",
+        "wifi": "Wi-Fi",
+        "offline": "Hors ligne",
+        "sw_internet": "Internet",
+        "sw_wifi": "Wi-Fi",
+        "sw_link": "Connexion",
+        "row_ip": "Adresse IP",
+        "row_internet": "Accès Internet",
+        "row_wifi": "Accès Wi-Fi",
+        "row_link": "Connexion",
+        "empty": "Aucun appareil connu pour le moment.",
+        "notif_title": "Bbox Bouygues",
+        "notif": (
+            "**Dashboards Bbox prêts** : {paths}\n\n"
+            "1. **Redémarrez Home Assistant** une fois (nécessaire pour qu'un "
+            "nouveau dashboard apparaisse dans la barre latérale)\n"
+            "2. Ouvrez-le dans la barre latérale\n"
+            "3. Menu ⋮ → **Modifier le dashboard** pour le personnaliser\n\n"
+            "**mushroom** nécessite les cartes HACS *Mushroom*, **auto** "
+            "*auto-entities*. Essayez **native** sinon.\n"
+            "Ensuite, la liste d'appareils se met à jour toute seule."
+        ),
+    },
+    "en": {
+        "box": "Router",
+        "connected": "Connected devices",
+        "blocked": "Blocked devices",
+        "wired": "Wired",
+        "wifi": "Wi-Fi",
+        "offline": "Offline",
+        "sw_internet": "Internet",
+        "sw_wifi": "Wi-Fi",
+        "sw_link": "Link",
+        "row_ip": "IP address",
+        "row_internet": "Internet access",
+        "row_wifi": "Wi-Fi access",
+        "row_link": "Connection",
+        "empty": "No known device yet.",
+        "notif_title": "Bbox Bouygues",
+        "notif": (
+            "**Bbox dashboards ready**: {paths}\n\n"
+            "1. **Restart Home Assistant** once (needed for a new dashboard "
+            "to show up in the sidebar)\n"
+            "2. Open it from the sidebar\n"
+            "3. ⋮ menu → **Edit dashboard** to customise it\n\n"
+            "**mushroom** needs the HACS *Mushroom* cards, **auto** needs "
+            "*auto-entities*. Try **native** otherwise.\n"
+            "Afterwards the device list updates by itself."
+        ),
+    },
+}
+
+
+def _t(hass: HomeAssistant) -> dict[str, str]:
+    lang = str(getattr(hass.config, "language", "en") or "en").lower()
+    return _TEXTS["fr" if lang.startswith("fr") else "en"]
 
 
 # ---------------------------------------------------------------------------
-# Configs Lovelace minimales et valides
+# Entity lookup (entity registry, by unique id)
 # ---------------------------------------------------------------------------
 
 
-def _box_card() -> dict[str, Any]:
+def _eid(reg: er.EntityRegistry, domain: str, unique_id: str) -> str | None:
+    return reg.async_get_entity_id(domain, DOMAIN, unique_id)
+
+
+def _box_entities(hass: HomeAssistant) -> dict[str, str | None]:
+    """``entity_id`` of the router entities (``None`` when not registered)."""
+    reg = er.async_get(hass)
+    return {
+        "clients": _eid(reg, "sensor", "clients_connected"),
+        "known": _eid(reg, "sensor", "devices_known"),
+        "guest": _eid(reg, "sensor", "guest_network"),
+        "wifi": _eid(reg, "switch", "wifi_all"),
+        "wifi24": _eid(reg, "switch", "wifi_24"),
+        "wifi5": _eid(reg, "switch", "wifi_5"),
+        "refresh": _eid(reg, "button", "refresh"),
+        "reconnect": _eid(reg, "button", "reconnect"),
+    }
+
+
+def _devices(hass: HomeAssistant) -> list[dict[str, Any]]:
+    """Known devices with the entity ids of their own entities.
+
+    A device is kept when its presence sensor is registered; the switches that
+    do not exist (e.g. no Wi-Fi switch on a wired device) are simply absent.
+    """
+    reg = er.async_get(hass)
+    raw: list[dict[str, Any]] = []
+    for value in (hass.data.get(DOMAIN) or {}).values():
+        if isinstance(value, dict) and "coordinator" in value:
+            raw += list((value["coordinator"].data or {}).get("devices") or [])
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for dev in raw:
+        mac = str(dev.get("mac") or "").lower()
+        if not mac or mac in seen:
+            continue
+        seen.add(mac)
+        presence = _eid(reg, "binary_sensor", f"presence_{mac}")
+        if not presence:
+            continue
+        out.append(
+            {
+                "mac": mac,
+                "name": str(dev.get("name") or mac),
+                "presence": presence,
+                "internet": _eid(reg, "switch", f"internet_{mac}"),
+                "wifi": _eid(reg, "switch", f"wifi_device_{mac}"),
+                "link": _eid(reg, "switch", f"device_{mac}"),
+            }
+        )
+    out.sort(key=lambda d: d["name"].lower())
+    return out
+
+
+def _switches(dev: dict[str, Any]) -> list[str]:
+    return [dev[k] for k in ("internet", "wifi", "link") if dev.get(k)]
+
+
+def _only(items: list[str | None]) -> list[str]:
+    return [i for i in items if i]
+
+
+def _box_rows(box: dict[str, str | None]) -> list[str]:
+    return _only(
+        [box[k] for k in ("clients", "known", "guest", "wifi", "wifi24", "wifi5", "refresh", "reconnect")]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Visibility conditions
+# ---------------------------------------------------------------------------
+
+
+def _cond_connected(dev: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"condition": "state", "entity": dev["presence"], "state": "on"}]
+
+
+def _cond_blocked(dev: dict[str, Any]) -> list[dict[str, Any]]:
+    """Blocked = at least one of the device switches is off."""
+    states = [
+        {"condition": "state", "entity": e, "state": "off"} for e in _switches(dev)
+    ]
+    if len(states) <= 1:
+        return states
+    return [{"condition": "or", "conditions": states}]
+
+
+def _conditional(conditions: list[dict[str, Any]], card: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "conditional", "conditions": conditions, "card": card}
+
+
+def _sections_view(
+    box_cards: list[dict[str, Any]],
+    txt: dict[str, str],
+    connected: list[dict[str, Any]],
+    blocked: list[dict[str, Any]],
+) -> dict[str, Any]:
+    def heading(title: str, icon: str) -> dict[str, Any]:
+        return {"type": "heading", "heading": title, "icon": icon, "heading_style": "title"}
+
+    sections = [
+        {"type": "grid", "cards": [heading(txt["box"], "mdi:router-wireless"), *box_cards]},
+        {
+            "type": "grid",
+            "cards": [heading(txt["connected"], "mdi:lan-connect"), *connected],
+        },
+        {
+            "type": "grid",
+            "cards": [heading(txt["blocked"], "mdi:web-off"), *blocked],
+        },
+    ]
+    return {
+        "views": [
+            {
+                "title": "Bbox",
+                "path": "home",
+                "type": "sections",
+                "max_columns": 2,
+                "sections": sections,
+            }
+        ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# native : standard cards only
+# ---------------------------------------------------------------------------
+
+
+def _native_device_card(txt: dict[str, str], dev: dict[str, Any]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    if dev["internet"]:
+        rows.append(
+            {
+                "type": "attribute",
+                "entity": dev["internet"],
+                "attribute": "ip",
+                "name": txt["row_ip"],
+                "icon": "mdi:ip-network",
+            }
+        )
+    for key, label in (("internet", "row_internet"), ("wifi", "row_wifi"), ("link", "row_link")):
+        if dev.get(key):
+            rows.append({"entity": dev[key], "name": txt[label]})
     return {
         "type": "entities",
-        "title": "Etat de la box",
+        "title": dev["name"],
         "show_header_toggle": False,
-        "entities": list(ENTITES_BOX),
+        "state_color": True,
+        "entities": rows,
     }
 
 
-def _auto_card(title: str, attrs: dict[str, str]) -> dict[str, Any]:
-    """auto-entities : filtre UNIQUEMENT sur nos attributs custom."""
+def _config_native(hass: HomeAssistant) -> dict[str, Any]:
+    txt = _t(hass)
+    box = _box_entities(hass)
+    devices = _devices(hass)
+
+    box_cards: list[dict[str, Any]] = [
+        {"type": "entities", "show_header_toggle": False, "entities": _box_rows(box)}
+    ]
+    if not devices:
+        box_cards.append({"type": "markdown", "content": txt["empty"]})
+
+    connected = [
+        _conditional(_cond_connected(d), _native_device_card(txt, d)) for d in devices
+    ]
+    blocked = [
+        _conditional(_cond_blocked(d), _native_device_card(txt, d))
+        for d in devices
+        if _switches(d)
+    ]
+    return _sections_view(box_cards, txt, connected, blocked)
+
+
+# ---------------------------------------------------------------------------
+# mushroom : header + switch chips per device
+# ---------------------------------------------------------------------------
+
+
+def _mushroom_device_card(txt: dict[str, str], dev: dict[str, Any]) -> dict[str, Any]:
+    """Header (name, IP, link type) + one chip per switch of the device."""
+    ref = dev["internet"] or dev["presence"]
+    pres = dev["presence"]
+    link = f"(state_attr('{ref}', 'lien') | string | lower)"
+    wifi = f"('wi' in {link})"
+    header = {
+        "type": "custom:mushroom-template-card",
+        "entity": pres,
+        "primary": f"{{{{ state_attr('{ref}', 'nom') or '{dev['mac']}' }}}}",
+        "secondary": (
+            f"{{% if is_state('{pres}', 'on') %}}"
+            f"{{{{ state_attr('{ref}', 'ip') or '' }}}} · "
+            f"{{{{ state_attr('{ref}', 'ssid') or ('{txt['wifi']}' if {wifi} else '{txt['wired']}') }}}}"
+            f"{{% else %}}{txt['offline']}{{% endif %}}"
+        ),
+        "icon": f"{{% if {wifi} %}}mdi:wifi{{% else %}}mdi:ethernet{{% endif %}}",
+        "icon_color": f"{{{{ 'green' if is_state('{pres}', 'on') else 'grey' }}}}",
+        "tap_action": {"action": "more-info"},
+    }
+
+    chips: list[dict[str, Any]] = []
+    for key, label, on_icon, off_icon in (
+        ("internet", "sw_internet", "mdi:web", "mdi:web-off"),
+        ("wifi", "sw_wifi", "mdi:wifi", "mdi:wifi-off"),
+        ("link", "sw_link", "mdi:lan-connect", "mdi:lan-disconnect"),
+    ):
+        eid = dev.get(key)
+        if not eid:
+            continue
+        chips.append(
+            {
+                "type": "template",
+                "entity": eid,
+                "icon": f"{{{{ '{on_icon}' if is_state('{eid}', 'on') else '{off_icon}' }}}}",
+                "icon_color": f"{{{{ 'green' if is_state('{eid}', 'on') else 'red' }}}}",
+                "content": txt[label],
+                "tap_action": {"action": "toggle"},
+            }
+        )
+
+    cards: list[dict[str, Any]] = [header]
+    if chips:
+        cards.append({"type": "custom:mushroom-chips-card", "chips": chips})
+    return {"type": "vertical-stack", "cards": cards}
+
+
+def _config_mushroom(hass: HomeAssistant) -> dict[str, Any]:
+    txt = _t(hass)
+    box = _box_entities(hass)
+    devices = _devices(hass)
+
+    chips: list[dict[str, Any]] = []
+    if box["clients"]:
+        chips.append(
+            {
+                "type": "entity",
+                "entity": box["clients"],
+                "icon": "mdi:lan-connect",
+                "icon_color": "green",
+                "content_info": "state",
+            }
+        )
+    for key, icon in (("wifi", "mdi:wifi"), ("wifi24", "mdi:wifi"), ("wifi5", "mdi:wifi-star")):
+        if box[key]:
+            chips.append({"type": "entity", "entity": box[key], "icon": icon})
+    if box["guest"]:
+        chips.append(
+            {
+                "type": "entity",
+                "entity": box["guest"],
+                "icon": "mdi:account-network",
+                "content_info": "state",
+            }
+        )
+    for key in ("refresh", "reconnect"):
+        if box[key]:
+            chips.append({"type": "entity", "entity": box[key]})
+
+    box_cards: list[dict[str, Any]] = []
+    if chips:
+        box_cards.append({"type": "custom:mushroom-chips-card", "chips": chips})
+    if not devices:
+        box_cards.append({"type": "markdown", "content": txt["empty"]})
+
+    connected = [
+        _conditional(_cond_connected(d), _mushroom_device_card(txt, d)) for d in devices
+    ]
+    blocked = [
+        _conditional(_cond_blocked(d), _mushroom_device_card(txt, d))
+        for d in devices
+        if _switches(d)
+    ]
+    return _sections_view(box_cards, txt, connected, blocked)
+
+
+# ---------------------------------------------------------------------------
+# auto : auto-entities (follows new devices on its own)
+# ---------------------------------------------------------------------------
+
+
+def _auto_section(title: str, attrs: dict[str, str], domain_switch: bool = True) -> dict[str, Any]:
+    include: dict[str, Any] = {
+        "domain": "switch",
+        "attributes": attrs,
+        "options": {"secondary_info": "attribute", "attribute": "ip"},
+    }
     return {
         "type": "custom:auto-entities",
-        "show_empty": True,
-        "card": {
-            "type": "entities",
-            "title": title,
-            "show_header_toggle": False,
-        },
-        "filter": {
-            "include": [{"attributes": dict(attrs)}],
-            "exclude": [
-                {"entity_id": "*appareil_independant*"},
-                {"entity_id": "*separate*"},
-            ],
-        },
-        "sort": {"method": "friendly_name"},
+        "show_empty": False,
+        "card": {"type": "entities", "title": title, "show_header_toggle": False},
+        "filter": {"include": [include]},
+        "sort": {"method": "attribute", "attribute": "nom", "ignore_case": True},
     }
 
 
-def _config_native() -> dict[str, Any]:
-    """Aucune carte custom — doit toujours s'afficher."""
+def _config_auto(hass: HomeAssistant) -> dict[str, Any]:
+    txt = _t(hass)
+    box = _box_entities(hass)
     return {
         "views": [
             {
-                "title": "Home",
-                "path": "home",
-                "type": "masonry",
-                "cards": [
-                    _box_card(),
-                    {
-                        "type": "markdown",
-                        "content": (
-                            "### Clients\n"
-                            "Les commandes de chaque appareil sont sous le device "
-                            "**Bbox** (mode under_box) ou sous l'appareil independant.\n\n"
-                            "Utilisez **Bbox (auto)** ou **Bbox (Mushroom)** pour une "
-                            "liste dynamique (cartes HACS requises)."
-                        ),
-                    },
-                ],
-            }
-        ]
-    }
-
-
-def _config_auto() -> dict[str, Any]:
-    return {
-        "views": [
-            {
-                "title": "Home",
-                "path": "home",
-                "type": "masonry",
-                "cards": [
-                    _box_card(),
-                    _auto_card(
-                        "Appareils connectes",
-                        {"appareil": "client", "etat_connexion": "connecte"},
-                    ),
-                    _auto_card(
-                        "Appareils deconnectes",
-                        {"appareil": "client", "etat_connexion": "deconnecte"},
-                    ),
-                    _auto_card(
-                        "Acces Internet coupe",
-                        {"appareil": "client", "acces": "coupe"},
-                    ),
-                ],
-            }
-        ]
-    }
-
-
-def _config_mushroom() -> dict[str, Any]:
-    """Mushroom + auto-entities — structure simple, sans heading card."""
-    def _mush(title: str, attrs: dict[str, str], color: str) -> dict[str, Any]:
-        return {
-            "type": "custom:auto-entities",
-            "show_empty": True,
-            "card": {
-                "type": "entities",
-                "title": title,
-                "show_header_toggle": False,
-            },
-            "filter": {
-                "include": [{"attributes": dict(attrs)}],
-                "exclude": [
-                    {"entity_id": "*appareil_independant*"},
-                    {"entity_id": "*separate*"},
-                ],
-            },
-            "options": {
-                "type": "custom:mushroom-entity-card",
-                "icon_color": color,
-            },
-            "sort": {"method": "friendly_name"},
-        }
-
-    return {
-        "views": [
-            {
-                "title": "Home",
+                "title": "Bbox",
                 "path": "home",
                 "type": "masonry",
                 "cards": [
                     {
-                        "type": "custom:mushroom-chips-card",
-                        "chips": [
-                            {
-                                "type": "entity",
-                                "entity": "sensor.bbox_clients_connectes",
-                            },
-                            {"type": "entity", "entity": "switch.bbox_wifi"},
-                            {
-                                "type": "entity",
-                                "entity": "button.bbox_actualiser",
-                            },
-                        ],
+                        "type": "entities",
+                        "title": txt["box"],
+                        "show_header_toggle": False,
+                        "entities": _box_rows(box),
                     },
-                    _mush(
-                        "Connectes",
-                        {"appareil": "client", "etat_connexion": "connecte"},
-                        "green",
+                    # one row per device: its Internet switch
+                    _auto_section(
+                        txt["connected"],
+                        {"appareil": "client", "portee": "internet", "etat_connexion": "connecte"},
                     ),
-                    _mush(
-                        "Deconnectes",
-                        {"appareil": "client", "etat_connexion": "deconnecte"},
-                        "grey",
-                    ),
-                    _mush(
-                        "Acces coupe",
-                        {"appareil": "client", "acces": "coupe"},
-                        "red",
+                    # every client switch that is cut (Internet or Wi-Fi)
+                    _auto_section(
+                        txt["blocked"], {"appareil": "client", "acces": "coupe"}
                     ),
                 ],
             }
@@ -210,203 +463,79 @@ def _config_mushroom() -> dict[str, Any]:
     }
 
 
-def _config_for(kind: str) -> dict[str, Any]:
-    mapping = {
+def _config_for(hass: HomeAssistant, kind: str) -> dict[str, Any]:
+    builders = {
         DASHBOARD_NATIVE: _config_native,
         DASHBOARD_AUTO: _config_auto,
         DASHBOARD_MUSHROOM: _config_mushroom,
     }
-    return mapping.get(kind, _config_native)()
+    return builders.get(kind, _config_native)(hass)
 
 
 # ---------------------------------------------------------------------------
-# Creation via API HA
+# Writing to the Lovelace storage
 # ---------------------------------------------------------------------------
 
 
-async def async_create_storage_dashboard(
-    hass: HomeAssistant, kind: str
-) -> bool:
-    """Cree / met a jour un dashboard storage editable dans l'UI."""
+def _live_dashboard(hass: HomeAssistant, url_path: str) -> Any | None:
+    """The registered ``LovelaceStorage`` of a dashboard, if it is live."""
+    try:
+        from homeassistant.components.lovelace.const import LOVELACE_DATA
+    except ImportError:  # pragma: no cover
+        return None
+    data = hass.data.get(LOVELACE_DATA)
+    dashboards = getattr(data, "dashboards", None) or {}
+    obj = dashboards.get(url_path)
+    return obj if obj is not None and hasattr(obj, "async_save") else None
+
+
+async def async_create_storage_dashboard(hass: HomeAssistant, kind: str) -> str:
+    """Create or update a storage dashboard.
+
+    Returns ``"new"`` (restart needed), ``"updated"`` (live), ``"unchanged"``
+    or ``""`` on failure.
+    """
     url_path = STORAGE_PATHS.get(kind)
     if not url_path:
-        return False
+        return ""
+    config = _config_for(hass, kind)
 
-    title = STORAGE_TITLES[kind]
-    icon = STORAGE_ICONS[kind]
-    config = _config_for(kind)
-
-    # --- Methode 1 : API Lovelace interne (preferee) ---
     try:
-        ok = await _create_via_lovelace_api(hass, url_path, title, icon, config)
-        if ok:
-            _LOGGER.info(
-                "Dashboard '%s' (%s) cree via API Lovelace", title, url_path
-            )
-            return True
-    except Exception as err:  # pragma: no cover
-        _LOGGER.warning(
-            "API Lovelace indisponible pour %s (%s) — fallback Store",
-            url_path,
-            err,
-        )
+        live = _live_dashboard(hass, url_path)
+        if live is not None:
+            try:
+                if await live.async_load(False) == config:
+                    return "unchanged"
+            except Exception:  # noqa: BLE001 - no config yet
+                pass
+            await live.async_save(config)
+            _LOGGER.info("Dashboard %s updated", url_path)
+            return "updated"
 
-    # --- Methode 2 : Store direct (fallback) ---
-    try:
-        ok = await _create_via_store(hass, url_path, title, icon, config)
-        if ok:
-            _LOGGER.info(
-                "Dashboard '%s' (%s) cree via Store (redemarrer HA)",
-                title,
-                url_path,
-            )
-            return True
-    except Exception:
-        _LOGGER.exception("Echec creation dashboard %s", url_path)
+        item = {
+            "id": url_path,
+            "url_path": url_path,
+            "title": STORAGE_TITLES[kind],
+            "icon": STORAGE_ICONS[kind],
+            "show_in_sidebar": True,
+            "require_admin": False,
+        }
+        dashboards: Store = Store(hass, 1, "lovelace_dashboards")
+        data = await dashboards.async_load() or {}
+        items = [i for i in (data.get("items") or []) if i.get("id") != url_path]
+        items.append(item)
+        data["items"] = items
+        await dashboards.async_save(data)
 
-    return False
+        # LovelaceStorage reads ``{"config": <view config>}``
+        content: Store = Store(hass, 1, f"lovelace.{url_path}")
+        await content.async_save({"config": config})
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("Unable to write the dashboard %s", url_path)
+        return ""
 
-
-async def _create_via_lovelace_api(
-    hass: HomeAssistant,
-    url_path: str,
-    title: str,
-    icon: str,
-    config: dict[str, Any],
-) -> bool:
-    """Utilise DashboardsCollection + LovelaceStorage si disponibles."""
-    from homeassistant.components.lovelace.const import LOVELACE_DATA
-
-    lovelace_data = hass.data.get(LOVELACE_DATA)
-    if lovelace_data is None:
-        return False
-
-    # 1) Enregistrer le dashboard dans la collection
-    #    structure attendue par HA (mode storage)
-    dashboards = getattr(lovelace_data, "dashboards", None)
-    # dashboards est un dict url_path -> LovelaceConfig
-    # La collection d'items est souvent accessible autrement
-
-    # Approche robuste : utiliser le websocket handler en interne
-    # via la collection stockee
-    collection = getattr(lovelace_data, "dashboards_collection", None)
-    if collection is None:
-        # Chercher dans hass.data d'autres cles possibles
-        for key, val in list(hass.data.items()):
-            if type(val).__name__ == "DashboardsCollection":
-                collection = val
-                break
-
-    if collection is not None:
-        items = collection.async_items()
-        existing = next(
-            (i for i in items if i.get("url_path") == url_path), None
-        )
-        if existing is None:
-            await collection.async_create_item(
-                {
-                    "url_path": url_path,
-                    "title": title,
-                    "icon": icon,
-                    "show_in_sidebar": True,
-                    "require_admin": False,
-                    "mode": "storage",
-                }
-            )
-        else:
-            await collection.async_update_item(
-                existing["id"],
-                {
-                    "title": title,
-                    "icon": icon,
-                    "show_in_sidebar": True,
-                    "require_admin": False,
-                },
-            )
-
-    # 2) Sauver la config de la vue
-    from homeassistant.components.lovelace.dashboard import LovelaceStorage
-
-    # LovelaceStorage(hass, config_dict) ou (hass, url_path) selon version
-    storage_obj = None
-    if isinstance(dashboards, dict) and url_path in dashboards:
-        storage_obj = dashboards[url_path]
-    if storage_obj is None:
-        # Instancier et enregistrer
-        try:
-            storage_obj = LovelaceStorage(hass, url_path)
-        except TypeError:
-            # Signature (hass, item_dict)
-            storage_obj = LovelaceStorage(
-                hass,
-                {
-                    "id": url_path,
-                    "url_path": url_path,
-                    "title": title,
-                    "icon": icon,
-                    "show_in_sidebar": True,
-                    "require_admin": False,
-                    "mode": "storage",
-                },
-            )
-        if isinstance(dashboards, dict):
-            dashboards[url_path] = storage_obj
-
-    if hasattr(storage_obj, "async_save"):
-        await storage_obj.async_save(config)
-        return True
-
-    return False
-
-
-async def _create_via_store(
-    hass: HomeAssistant,
-    url_path: str,
-    title: str,
-    icon: str,
-    config: dict[str, Any],
-) -> bool:
-    """Fallback : ecriture Store + enregistrement panel frontend."""
-    from homeassistant.helpers.storage import Store
-
-    # Liste des dashboards
-    dashboards_store: Store = Store(hass, 1, "lovelace_dashboards")
-    data = await dashboards_store.async_load() or {}
-    items: list[dict[str, Any]] = list(data.get("items") or [])
-
-    existing = next((i for i in items if i.get("url_path") == url_path), None)
-    entry = {
-        "id": url_path,
-        "url_path": url_path,
-        "title": title,
-        "icon": icon,
-        "show_in_sidebar": True,
-        "require_admin": False,
-        "mode": "storage",
-    }
-    if existing:
-        existing.update(entry)
-    else:
-        items.append(entry)
-    data["items"] = items
-    await dashboards_store.async_save(data)
-
-    # Contenu
-    config_store: Store = Store(hass, 1, f"lovelace.{url_path}")
-    await config_store.async_save(config)
-
-    # Enregistrer le panel si possible (sinon visible apres restart)
-    try:
-        from homeassistant.components.lovelace import _register_panel
-        from homeassistant.components.lovelace.const import MODE_STORAGE
-
-        _register_panel(hass, url_path, MODE_STORAGE, entry, True)
-    except Exception:  # pragma: no cover
-        _LOGGER.debug(
-            "Panel %s non enregistre a chaud — restart HA requis", url_path
-        )
-
-    return True
+    _LOGGER.info("Dashboard %s written (restart needed to show it)", url_path)
+    return "new"
 
 
 async def async_setup_selected_dashboards(
@@ -415,31 +544,23 @@ async def async_setup_selected_dashboards(
     *,
     notify: bool = True,
 ) -> list[str]:
-    """Cree les dashboards demandes."""
+    """Create the requested dashboards and return their url paths."""
     created: list[str] = []
+    needs_restart = False
     for kind in selected:
         if kind not in DASHBOARD_CHOICES:
             continue
-        try:
-            if await async_create_storage_dashboard(hass, kind):
-                created.append(STORAGE_PATHS[kind])
-        except Exception:
-            _LOGGER.exception("Dashboard %s : echec", kind)
+        result = await async_create_storage_dashboard(hass, kind)
+        if result:
+            created.append(STORAGE_PATHS[kind])
+        needs_restart = needs_restart or result == "new"
 
-    if notify and created:
-        paths = ", ".join(f"`/{p}`" for p in created)
-        hass.components.persistent_notification.async_create(
-            (
-                f"**Dashboards Bbox prets**\n\n"
-                f"Crees / mis a jour : {paths}\n\n"
-                f"1. **Redemarrez Home Assistant** une fois\n"
-                f"2. Ouvrez le dashboard dans la barre laterale\n"
-                f"3. Menu ⋮ → **Edit dashboard** pour le personnaliser\n\n"
-                f"**auto** / **mushroom** necessitent les cartes HACS "
-                f"*auto-entities* et *Mushroom*.\n"
-                f"Commencez par **native** si un dashboard plante."
-            ),
-            title="Bbox Bouygues",
+    if notify and created and needs_restart:
+        txt = _t(hass)
+        persistent_notification.async_create(
+            hass,
+            txt["notif"].format(paths=", ".join(f"`/{p}`" for p in created)),
+            title=txt["notif_title"],
             notification_id="bbox_4g_dashboards",
         )
 
@@ -449,5 +570,17 @@ async def async_setup_selected_dashboards(
 async def async_write_dashboard(
     hass: HomeAssistant, devices: list[dict[str, Any]]
 ) -> bool:
-    """Compat coordinator : no-op."""
-    return False
+    """Called by the coordinator when the device list changes.
+
+    Rewrites the dashboards chosen in the options so that new, removed or
+    renamed devices show up without any manual action.
+    """
+    kinds: list[str] = []
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        for kind in (entry.options or {}).get(CONF_DASHBOARDS, []) or []:
+            if kind in DASHBOARD_CHOICES and kind not in kinds:
+                kinds.append(kind)
+    if not kinds:
+        return False
+    await async_setup_selected_dashboards(hass, kinds, notify=False)
+    return True

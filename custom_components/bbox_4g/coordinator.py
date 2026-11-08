@@ -14,11 +14,12 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .bbox_api import BboxAuthError, BboxError
 from .const import (
-    CONF_DASHBOARD,
+    CONF_DASHBOARDS,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -98,7 +99,7 @@ class BboxCoordinator(DataUpdateCoordinator):
     async def _async_update_dashboard(self, data: dict[str, Any]) -> None:
         """Régénère le tableau de bord si la liste d'appareils a changé."""
         options = getattr(self.entry, "options", {}) or {}
-        if not options.get(CONF_DASHBOARD, False):
+        if not options.get(CONF_DASHBOARDS):
             # L'écriture automatique est facultative : par défaut on ne
             # touche pas aux tableaux de bord de l'utilisateur.
             return
@@ -109,12 +110,15 @@ class BboxCoordinator(DataUpdateCoordinator):
         if signature == self._dashboard_signature:
             return
         self._dashboard_signature = signature
-        try:
-            await async_write_dashboard(self.hass, devices)
-        except Exception as err:  # pragma: no cover - défense
-            _LOGGER.warning(
-                "Unable to update the dashboard: %s", err
-            )
+
+        async def _write(_now: Any) -> None:
+            try:
+                await async_write_dashboard(self.hass, devices)
+            except Exception as err:  # pragma: no cover - defensive
+                _LOGGER.warning("Unable to update the dashboard: %s", err)
+
+        # Leave time for the platforms to create the entities of new devices.
+        async_call_later(self.hass, 20, _write)
 
     def _read_state(self) -> dict[str, Any]:
         """Lecture réelle de l'état."""
