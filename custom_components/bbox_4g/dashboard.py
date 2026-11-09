@@ -26,6 +26,7 @@ sidebar; afterwards it is updated live.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -34,15 +35,21 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
 from .const import (
+    CONF_BLOCK_SCOPE,
     CONF_DASHBOARDS,
     DASHBOARD_AUTO,
     DASHBOARD_CHOICES,
     DASHBOARD_MUSHROOM,
     DASHBOARD_NATIVE,
+    DEFAULT_BLOCK_SCOPE,
     DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# the router names unnamed devices after their MAC address
+_MAC_NAME_RE = re.compile(r"^[0-9a-f]{2}([-:][0-9a-f]{2}){5}$", re.IGNORECASE)
+_MAC_NAME_JINJA = "^[0-9A-Fa-f]{2}([-:][0-9A-Fa-f]{2}){5}$"
 
 # url_path MUST contain a hyphen (Home Assistant rule for new dashboards)
 STORAGE_PATHS = {
@@ -75,6 +82,11 @@ _TEXTS: dict[str, dict[str, str]] = {
         "wired": "Filaire",
         "wifi": "Wi-Fi",
         "offline": "Hors ligne",
+        "unknown": "Appareil inconnu",
+        "online": "en ligne",
+        "guest": "Invité",
+        "none_connected": "Aucun appareil connecté.",
+        "none_blocked": "Aucun appareil bloqué.",
         "sw_internet": "Internet",
         "sw_wifi": "Wi-Fi",
         "sw_link": "Connexion",
@@ -102,6 +114,11 @@ _TEXTS: dict[str, dict[str, str]] = {
         "wired": "Wired",
         "wifi": "Wi-Fi",
         "offline": "Offline",
+        "unknown": "Unknown device",
+        "online": "online",
+        "guest": "Guest",
+        "none_connected": "No connected device.",
+        "none_blocked": "No blocked device.",
         "sw_internet": "Internet",
         "sw_wifi": "Wi-Fi",
         "sw_link": "Link",
@@ -154,6 +171,12 @@ def _box_entities(hass: HomeAssistant) -> dict[str, str | None]:
     }
 
 
+def _scope(hass: HomeAssistant) -> str:
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        return str((entry.options or {}).get(CONF_BLOCK_SCOPE, DEFAULT_BLOCK_SCOPE))
+    return DEFAULT_BLOCK_SCOPE
+
+
 def _devices(hass: HomeAssistant) -> list[dict[str, Any]]:
     """Known devices with the entity ids of their own entities.
 
@@ -161,6 +184,9 @@ def _devices(hass: HomeAssistant) -> list[dict[str, Any]]:
     do not exist (e.g. no Wi-Fi switch on a wired device) are simply absent.
     """
     reg = er.async_get(hass)
+    # With the default scope (``lan``) the "Connexion" switch drives the very
+    # same MAC filter as "Internet": showing both would be a duplicate.
+    show_link = _scope(hass) != DEFAULT_BLOCK_SCOPE
     raw: list[dict[str, Any]] = []
     for value in (hass.data.get(DOMAIN) or {}).values():
         if isinstance(value, dict) and "coordinator" in value:
@@ -176,18 +202,32 @@ def _devices(hass: HomeAssistant) -> list[dict[str, Any]]:
         presence = _eid(reg, "binary_sensor", f"presence_{mac}")
         if not presence:
             continue
+        name = str(dev.get("name") or mac)
         out.append(
             {
                 "mac": mac,
-                "name": str(dev.get("name") or mac),
+                "name": name,
+                "unnamed": bool(_MAC_NAME_RE.match(name)),
                 "presence": presence,
                 "internet": _eid(reg, "switch", f"internet_{mac}"),
                 "wifi": _eid(reg, "switch", f"wifi_device_{mac}"),
-                "link": _eid(reg, "switch", f"device_{mac}"),
+                "link": _eid(reg, "switch", f"device_{mac}") if show_link else None,
             }
         )
-    out.sort(key=lambda d: d["name"].lower())
+    # named devices first (A-Z), unnamed ones last
+    out.sort(key=lambda d: (d["unnamed"], d["name"].lower()))
     return out
+
+
+def _tail(dev: dict[str, Any]) -> str:
+    """Last two bytes of the MAC, e.g. ``5E:B5``."""
+    return dev["mac"][-5:].upper()
+
+
+def _label(txt: dict[str, str], dev: dict[str, Any]) -> str:
+    if dev["unnamed"]:
+        return f"{txt['unknown']} ({_tail(dev)})"
+    return dev["name"]
 
 
 def _switches(dev: dict[str, Any]) -> list[str]:
@@ -227,24 +267,77 @@ def _conditional(conditions: list[dict[str, Any]], card: dict[str, Any]) -> dict
     return {"type": "conditional", "conditions": conditions, "card": card}
 
 
+def _empty_hints(
+    txt: dict[str, str], devices: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Helper texts shown only while a section would otherwise be empty."""
+    if not devices:
+        return [], []
+    none_on = [
+        {"condition": "state", "entity": d["presence"], "state": "off"} for d in devices
+    ]
+    none_off = [
+        {"condition": "state", "entity": e, "state_not": "off"}
+        for d in devices
+        for e in _switches(d)
+    ]
+    hint_connected = [
+        _conditional(none_on, {"type": "markdown", "content": txt["none_connected"]})
+    ]
+    hint_blocked = (
+        [_conditional(none_off, {"type": "markdown", "content": txt["none_blocked"]})]
+        if none_off
+        else []
+    )
+    return hint_connected, hint_blocked
+
+
+def _count_template(devices: list[dict[str, Any]], kind: str) -> str:
+    """Jinja expression: number of connected / blocked devices."""
+    parts: list[str] = []
+    for d in devices:
+        if kind == "connected":
+            parts.append(f"(is_state('{d['presence']}', 'on') | int(0))")
+        else:
+            sw = _switches(d)
+            if sw:
+                cond = " or ".join(f"is_state('{e}', 'off')" for e in sw)
+                parts.append(f"(({cond}) | int(0))")
+    return "{{ " + (" + ".join(parts) if parts else "0") + " }}"
+
+
 def _sections_view(
     box_cards: list[dict[str, Any]],
     txt: dict[str, str],
     connected: list[dict[str, Any]],
     blocked: list[dict[str, Any]],
+    *,
+    devices: list[dict[str, Any]] | None = None,
+    counts: bool = False,
 ) -> dict[str, Any]:
-    def heading(title: str, icon: str) -> dict[str, Any]:
+    devices = devices or []
+    hint_connected, hint_blocked = _empty_hints(txt, devices)
+    connected = [*connected, *hint_connected]
+    blocked = [*blocked, *hint_blocked]
+
+    def heading(title: str, icon: str, kind: str = "") -> dict[str, Any]:
+        if counts and kind and devices:
+            # Mushroom title cards accept templates: "Connected devices (3)"
+            return {
+                "type": "custom:mushroom-title-card",
+                "title": f"{title} ({_count_template(devices, kind)})",
+            }
         return {"type": "heading", "heading": title, "icon": icon, "heading_style": "title"}
 
     sections = [
         {"type": "grid", "cards": [heading(txt["box"], "mdi:router-wireless"), *box_cards]},
         {
             "type": "grid",
-            "cards": [heading(txt["connected"], "mdi:lan-connect"), *connected],
+            "cards": [heading(txt["connected"], "mdi:lan-connect", "connected"), *connected],
         },
         {
             "type": "grid",
-            "cards": [heading(txt["blocked"], "mdi:web-off"), *blocked],
+            "cards": [heading(txt["blocked"], "mdi:web-off", "blocked"), *blocked],
         },
     ]
     return {
@@ -282,7 +375,7 @@ def _native_device_card(txt: dict[str, str], dev: dict[str, Any]) -> dict[str, A
             rows.append({"entity": dev[key], "name": txt[label]})
     return {
         "type": "entities",
-        "title": dev["name"],
+        "title": _label(txt, dev),
         "show_header_toggle": False,
         "state_color": True,
         "entities": rows,
@@ -308,7 +401,7 @@ def _config_native(hass: HomeAssistant) -> dict[str, Any]:
         for d in devices
         if _switches(d)
     ]
-    return _sections_view(box_cards, txt, connected, blocked)
+    return _sections_view(box_cards, txt, connected, blocked, devices=devices)
 
 
 # ---------------------------------------------------------------------------
@@ -322,15 +415,25 @@ def _mushroom_device_card(txt: dict[str, str], dev: dict[str, Any]) -> dict[str,
     pres = dev["presence"]
     link = f"(state_attr('{ref}', 'lien') | string | lower)"
     wifi = f"('wi' in {link})"
+    # unnamed device (the router names it after its MAC address)?
+    unnamed = (
+        f"{{% set n = state_attr('{ref}', 'nom') | string %}}"
+        f"{{% set unk = (n in ['', 'None']) or n | regex_match('{_MAC_NAME_JINJA}') %}}"
+    )
+    ip = f"((state_attr('{ref}', 'ip') or '') | string | replace(',', ';')).split(';')[0]"
     header = {
         "type": "custom:mushroom-template-card",
         "entity": pres,
-        "primary": f"{{{{ state_attr('{ref}', 'nom') or '{dev['mac']}' }}}}",
+        "primary": (
+            f"{unnamed}{{% if unk %}}{txt['unknown']}{{% else %}}{{{{ n }}}}{{% endif %}}"
+        ),
         "secondary": (
+            f"{unnamed}"
             f"{{% if is_state('{pres}', 'on') %}}"
-            f"{{{{ state_attr('{ref}', 'ip') or '' }}}} · "
+            f"{{{{ {ip} }}}} · "
             f"{{{{ state_attr('{ref}', 'ssid') or ('{txt['wifi']}' if {wifi} else '{txt['wired']}') }}}}"
             f"{{% else %}}{txt['offline']}{{% endif %}}"
+            f"{{% if unk %}} · {_tail(dev)}{{% endif %}}"
         ),
         "icon": f"{{% if {wifi} %}}mdi:wifi{{% else %}}mdi:ethernet{{% endif %}}",
         "icon_color": f"{{{{ 'green' if is_state('{pres}', 'on') else 'grey' }}}}",
@@ -360,7 +463,69 @@ def _mushroom_device_card(txt: dict[str, str], dev: dict[str, Any]) -> dict[str,
     cards: list[dict[str, Any]] = [header]
     if chips:
         cards.append({"type": "custom:mushroom-chips-card", "chips": chips})
-    return {"type": "vertical-stack", "cards": cards}
+    return {
+        "type": "vertical-stack",
+        "cards": cards,
+        # optional (needs card_mod): glue the header and its chips together
+        "card_mod": {
+            "style": ":host { --vertical-stack-card-gap: 0px; --stack-card-gap: 0px; }"
+        },
+    }
+
+
+def _box_chips(txt: dict[str, str], box: dict[str, str | None]) -> list[dict[str, Any]]:
+    """Labelled, coloured chips for the router section."""
+    chips: list[dict[str, Any]] = []
+    clients = box["clients"]
+    if clients:
+        chips.append(
+            {
+                "type": "template",
+                "entity": clients,
+                "icon": "mdi:lan-connect",
+                "icon_color": f"{{{{ 'green' if states('{clients}') | int(0) > 0 else 'grey' }}}}",
+                "content": f"{{{{ states('{clients}') }}}} {txt['online']}",
+                "tap_action": {"action": "more-info"},
+            }
+        )
+    for key, label in (("wifi", txt["sw_wifi"]), ("wifi24", "2,4 GHz"), ("wifi5", "5 GHz")):
+        eid = box[key]
+        if eid:
+            chips.append(
+                {
+                    "type": "template",
+                    "entity": eid,
+                    "icon": f"{{{{ 'mdi:wifi' if is_state('{eid}', 'on') else 'mdi:wifi-off' }}}}",
+                    "icon_color": f"{{{{ 'green' if is_state('{eid}', 'on') else 'red' }}}}",
+                    "content": label,
+                    "tap_action": {"action": "toggle"},
+                }
+            )
+    guest = box["guest"]
+    if guest:
+        chips.append(
+            {
+                "type": "template",
+                "entity": guest,
+                "icon": "mdi:account-network",
+                "icon_color": f"{{{{ 'green' if is_state('{guest}', 'activé') else 'grey' }}}}",
+                "content": txt["guest"],
+                "tap_action": {"action": "more-info"},
+            }
+        )
+    # icon-only action chips (a button's own state is just its last press)
+    for key, icon, confirm in (("refresh", "mdi:refresh", False), ("reconnect", "mdi:connection", True)):
+        eid = box[key]
+        if eid:
+            tap: dict[str, Any] = {
+                "action": "perform-action",
+                "perform_action": "button.press",
+                "target": {"entity_id": eid},
+            }
+            if confirm:
+                tap["confirmation"] = True
+            chips.append({"type": "action", "icon": icon, "tap_action": tap})
+    return chips
 
 
 def _config_mushroom(hass: HomeAssistant) -> dict[str, Any]:
@@ -368,33 +533,7 @@ def _config_mushroom(hass: HomeAssistant) -> dict[str, Any]:
     box = _box_entities(hass)
     devices = _devices(hass)
 
-    chips: list[dict[str, Any]] = []
-    if box["clients"]:
-        chips.append(
-            {
-                "type": "entity",
-                "entity": box["clients"],
-                "icon": "mdi:lan-connect",
-                "icon_color": "green",
-                "content_info": "state",
-            }
-        )
-    for key, icon in (("wifi", "mdi:wifi"), ("wifi24", "mdi:wifi"), ("wifi5", "mdi:wifi-star")):
-        if box[key]:
-            chips.append({"type": "entity", "entity": box[key], "icon": icon})
-    if box["guest"]:
-        chips.append(
-            {
-                "type": "entity",
-                "entity": box["guest"],
-                "icon": "mdi:account-network",
-                "content_info": "state",
-            }
-        )
-    for key in ("refresh", "reconnect"):
-        if box[key]:
-            chips.append({"type": "entity", "entity": box[key]})
-
+    chips = _box_chips(txt, box)
     box_cards: list[dict[str, Any]] = []
     if chips:
         box_cards.append({"type": "custom:mushroom-chips-card", "chips": chips})
@@ -409,7 +548,9 @@ def _config_mushroom(hass: HomeAssistant) -> dict[str, Any]:
         for d in devices
         if _switches(d)
     ]
-    return _sections_view(box_cards, txt, connected, blocked)
+    return _sections_view(
+        box_cards, txt, connected, blocked, devices=devices, counts=True
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -57,6 +57,14 @@ MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
 IPV4_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 
+def _ipv4_only(value: str) -> str:
+    """Keep the IPv4 of a ``"192.168.1.2;fe80::1"`` style value."""
+    for part in re.split(r"[;,\s]+", value or ""):
+        if IPV4_RE.match(part):
+            return part
+    return (value or "").split(";")[0].strip() if ":" not in (value or "").split(";")[0] else ""
+
+
 #: Endpoints Huawei utiles pour la surveillance du Wi-Fi et des clients.
 #: Ils ne sont pas tous exposés par tous les firmwares : le diagnostic les
 #: sonde un par un et indique lesquels répondent.
@@ -659,7 +667,7 @@ class SagemcomBbox:
                 {
                     "mac": mac,
                     "name": str(name),
-                    "ip": host.get("ipaddress", ""),
+                    "ip": _ipv4_only(host.get("ipaddress", "")),
                     "active": int(host.get("active", 0) or 0) == 1,
                     "link": host.get("link", ""),
                     "guest": bool(host.get("guest", 0)),
@@ -1533,7 +1541,9 @@ class HuaweiCpe:
             devices[mac] = {
                 "mac": mac,
                 "name": _valeur(host, "ActualName", "HostName") or mac,
-                "ip": _valeur(host, "IpAddress", "IPAddress", "HostIPv4Address"),
+                "ip": _ipv4_only(
+                    _valeur(host, "IpAddress", "IPAddress", "HostIPv4Address")
+                ),
                 "active": _valeur(host, "Active") == "1",
                 "link": (
                     "Wifi"
