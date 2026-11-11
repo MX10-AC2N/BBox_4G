@@ -36,13 +36,56 @@
     "step": {
       "init": {
         "title": "Options Bbox",
-        "description": "Réglages de l'intégration.",
+        "menu_options": {
+          "settings": "Réglages généraux",
+          "parental_add": "Contrôle parental : ajouter un profil",
+          "parental_edit": "Contrôle parental : modifier un profil",
+          "parental_remove": "Contrôle parental : supprimer un profil"
+        }
+      },
+      "settings": {
+        "title": "Options Bbox",
+        "description": "Réglages de l'intégration.\n\n• under_box (par défaut) : toutes les entités des clients sont rattachées à l'appareil Bbox.\n• separate : chaque client devient un appareil Home Assistant.\n\nTableaux de bord : choisissez les variantes à créer dans la barre latérale (rafraîchissez la page après l'enregistrement).",
         "data": {
           "scan_interval": "Fréquence d'interrogation (secondes)",
           "block_scope": "Portée du blocage d'un appareil",
-          "write_dashboard": "Écrire les tableaux de bord dans /config/lovelace"
+          "device_mode": "Mode des appareils clients par défaut",
+          "dashboards": "Tableaux de bord à créer dans la barre latérale"
+        }
+      },
+      "parental_add": {
+        "title": "Nouveau profil de contrôle parental",
+        "description": "Un profil regroupe les appareils d'une personne (téléphone, tablette, console…). Ils partagent les mêmes plages de coupure et le même quota journalier, que vous réglez ensuite dans les entités du profil. Le profil démarre désactivé.",
+        "data": {
+          "name": "Nom du profil",
+          "macs": "Appareils"
+        }
+      },
+      "parental_edit": {
+        "title": "Modifier un profil",
+        "data": {
+          "profile": "Profil"
+        }
+      },
+      "parental_edit_form": {
+        "title": "Modifier le profil",
+        "data": {
+          "name": "Nom du profil",
+          "macs": "Appareils"
+        }
+      },
+      "parental_remove": {
+        "title": "Supprimer un profil",
+        "description": "Les appareils bloqués par ce profil sont libérés.",
+        "data": {
+          "profile": "Profil"
         }
       }
+    },
+    "error": {
+      "name_required": "Saisissez un nom.",
+      "name_exists": "Un profil porte déjà ce nom.",
+      "no_device": "Sélectionnez au moins un appareil."
     }
   },
   "services": {
@@ -119,6 +162,20 @@
         "allowed": {
           "name": "Accès autorisé",
           "description": "false pour déconnecter du Wi-Fi, true pour le reconnecter."
+        }
+      }
+    },
+    "grant_extra_time": {
+      "name": "Accorder du temps",
+      "description": "Lève toutes les restrictions de contrôle parental d'un profil (plages et quota) pour un moment.",
+      "fields": {
+        "profile": {
+          "name": "Profil",
+          "description": "Nom du profil de contrôle parental."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Durée de la dérogation (60 par défaut). 0 annule une dérogation en cours."
         }
       }
     }
