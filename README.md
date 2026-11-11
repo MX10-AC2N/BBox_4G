@@ -84,6 +84,34 @@ data:
     - mushroom
 ```
 
+## Parental control
+
+Group the devices of a child (phone, tablet, console…) into a **profile**. Bedtime windows and the override are shared by the profile; the quota is set per device. Rules are applied by the integration itself, with the router's MAC filter.
+
+*Settings → Devices & services → Bbox Bouygues → Configure → Parental control: add a profile*
+
+Each profile creates a device **Contrôle parental – <name>** with:
+
+| Entity | Purpose |
+|---|---|
+| Switch **Activé** | turns the rules on or off (a new profile starts **off**) |
+| Times **Coupure semaine / week-end – début / fin** | bedtime windows, may span midnight (21:00 → 07:00). Same start and end = no window |
+| Numbers **Quota semaine / week-end – <device>** | daily quota in minutes **per device** (each device of the profile has its own), `0` = no quota |
+| Sensor **Statut** | `Libre`, `Coupé jusqu'à 07:00`, `Quota atteint`, `Dérogation jusqu'à 18:30`, `Désactivé` |
+| Sensors **Temps utilisé – <device>** | minutes counted today for each device |
+| Button **Rétablir 1 h** | lifts every restriction for one hour |
+
+How it works:
+
+- Nights **starting on Friday and Saturday** use the *weekend* window; the others use the *week* window. The quota "weekend" applies on Saturday and Sunday.
+- The quota is **per device**: each device has its own limit and its own counter, which runs while that device is **connected and allowed**. When a device reaches its quota only that device is cut; the others keep going. A phone that stays connected on Wi-Fi while idle keeps counting: the router does not tell whether the screen is used.
+- Priority: switch off → override → bedtime window → quota. The daily counter resets at midnight.
+- Rules are checked every minute and after each refresh, so **Home Assistant must be running**; when it is stopped the router keeps the last state.
+- The integration only releases devices **it blocked itself**: a device you blocked by hand stays blocked. If you unblock a device during a restriction, it is blocked again within a minute: use **Rétablir 1 h**.
+- Devices must keep a fixed MAC address (turn off the "private / random Wi-Fi address" option on the children's phones).
+
+Service: `bbox_4g.grant_extra_time` (`profile`, `minutes` — default 60, `0` cancels).
+
 ## Services
 
 | Service | Arguments |
@@ -94,6 +122,7 @@ data:
 | `bbox_4g.set_internet_access` | `mac`, `allowed` |
 | `bbox_4g.set_wifi_access` | `mac`, `allowed` |
 | `bbox_4g.wake_device` | `mac` |
+| `bbox_4g.grant_extra_time` | `profile`, `minutes` |
 | `bbox_4g.create_dashboard` | `dashboards` (`native`, `auto`, `mushroom`) |
 
 ```yaml

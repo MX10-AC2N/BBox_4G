@@ -82,6 +82,34 @@ data:
     - mushroom
 ```
 
+## Contrôle parental
+
+Regroupez les appareils d'un enfant (téléphone, tablette, console…) dans un **profil**. Les plages de coupure et la dérogation sont communes au profil ; le quota se règle appareil par appareil. Les règles sont appliquées par l'intégration elle-même, avec le filtre MAC de la box.
+
+*Paramètres → Appareils et services → Bbox Bouygues → Configurer → Contrôle parental : ajouter un profil*
+
+Chaque profil crée un appareil **Contrôle parental – <nom>** avec :
+
+| Entité | Rôle |
+|---|---|
+| Interrupteur **Activé** | active ou désactive les règles (un nouveau profil démarre **désactivé**) |
+| Heures **Coupure semaine / week-end – début / fin** | plages de coupure, possibles à cheval sur minuit (21:00 → 07:00). Début = fin : pas de plage |
+| Nombres **Quota semaine / week-end – <appareil>** | quota journalier en minutes **par appareil** (chaque appareil du profil a le sien), `0` = pas de quota |
+| Capteur **Statut** | `Libre`, `Coupé jusqu'à 07:00`, `Quota atteint`, `Dérogation jusqu'à 18:30`, `Désactivé` |
+| Capteurs **Temps utilisé – <appareil>** | minutes comptées aujourd'hui pour chaque appareil |
+| Bouton **Rétablir 1 h** | lève toutes les restrictions pendant une heure |
+
+Fonctionnement :
+
+- Les nuits qui **commencent le vendredi et le samedi** utilisent la plage *week-end* ; les autres, la plage *semaine*. Le quota « week-end » s'applique le samedi et le dimanche.
+- Le quota est **par appareil** : chaque appareil a sa limite et son compteur, qui tourne tant qu'il est **connecté et autorisé**. Quand un appareil atteint son quota, seul celui-là est coupé, les autres continuent. Un téléphone qui reste connecté en Wi-Fi sans servir continue de compter : la box ne sait pas si l'écran est utilisé.
+- Priorité : interrupteur désactivé → dérogation → plage de coupure → quota. Le compteur repart de zéro à minuit.
+- Les règles sont vérifiées chaque minute et après chaque actualisation : **Home Assistant doit tourner** ; à l'arrêt, la box garde le dernier état.
+- L'intégration ne libère que les appareils **qu'elle a bloqués elle-même** : un appareil bloqué à la main reste bloqué. Si vous débloquez un appareil pendant une restriction, il est rebloqué dans la minute : utilisez **Rétablir 1 h**.
+- Les appareils doivent garder une adresse MAC fixe (désactivez l'option « adresse Wi-Fi privée / aléatoire » sur les téléphones des enfants).
+
+Service : `bbox_4g.grant_extra_time` (`profil` → champ `profile`, `minutes` — 60 par défaut, `0` annule).
+
 ## Services
 
 | Service | Arguments |
@@ -92,6 +120,7 @@ data:
 | `bbox_4g.set_internet_access` | `mac`, `allowed` |
 | `bbox_4g.set_wifi_access` | `mac`, `allowed` |
 | `bbox_4g.wake_device` | `mac` |
+| `bbox_4g.grant_extra_time` | `profile`, `minutes` |
 | `bbox_4g.create_dashboard` | `dashboards` (`native`, `auto`, `mushroom`) |
 
 ```yaml
