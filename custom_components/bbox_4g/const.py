@@ -19,6 +19,7 @@ CONF_DASHBOARD = "write_dashboard"  # legacy bool
 CONF_DASHBOARDS = "dashboards"  # list: native, auto, mushroom
 CONF_DEVICE_MODE = "device_mode"
 CONF_SEPARATE_MACS = "separate_macs"
+CONF_PROFILES = "profiles"  # parental control profiles
 
 DEFAULT_HOST = "192.168.1.1"
 DEFAULT_USERNAME = "admin"
@@ -43,7 +44,15 @@ SCAN_INTERVAL_MAX = 600
 BLOCK_SCOPES = ("lan", "wifi", "internet", "all")
 FAMILIES = ("auto", "huawei", "sagemcom")
 
-PLATFORMS = ["sensor", "binary_sensor", "switch", "device_tracker", "button"]
+PLATFORMS = [
+    "sensor",
+    "binary_sensor",
+    "switch",
+    "device_tracker",
+    "button",
+    "number",
+    "time",
+]
 
 ATTR_MAC = "mac"
 ATTR_DEVICE_NAME = "device_name"
@@ -64,3 +73,4 @@ SERVICE_WAKE_DEVICE = "wake_device"
 SERVICE_SET_INTERNET = "set_internet_access"
 SERVICE_SET_WIFI_ACCESS = "set_wifi_access"
 SERVICE_CREATE_DASHBOARD = "create_dashboard"
+SERVICE_GRANT_EXTRA_TIME = "grant_extra_time"

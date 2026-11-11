@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .bbox_api import BboxAuthError, BboxError, wake_on_lan
 from .const import ATTR_MAC, DOMAIN
 from .coordinator import BboxCoordinator
+from .parental_entities import build as build_parental, manager_of
 from .devices import (
     async_purge_disparus,
     box_device_info,
@@ -50,6 +51,9 @@ async def async_setup_entry(
             BboxReconnectButton(coordinator, entry),
         ]
     )
+    manager = manager_of(hass, entry)
+    if manager:
+        async_add_entities(build_parental("button", manager))
     _sync()
 
 

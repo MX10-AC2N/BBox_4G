@@ -22,6 +22,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import BboxCoordinator
+from .parental_entities import build as build_parental, manager_of
 from .devices import box_device_info, get_device_info_for_client, is_client_separate
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,11 +79,13 @@ async def async_setup_entry(
             async_add_entities(new_entities)
 
     entry.async_on_unload(coordinator.async_add_listener(_sync))
+    manager = manager_of(hass, entry)
     async_add_entities(
         [
             BboxWifiSwitch(coordinator, entry, band="all"),
             BboxWifiSwitch(coordinator, entry, band="24"),
             BboxWifiSwitch(coordinator, entry, band="5"),
+            *(build_parental("switch", manager) if manager else []),
         ]
     )
     _sync()

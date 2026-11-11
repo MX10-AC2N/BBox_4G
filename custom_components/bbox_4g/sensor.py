@@ -17,6 +17,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import BboxCoordinator
+from .parental_entities import build as build_parental, manager_of
 from .devices import box_device_info
 
 __all__ = ["box_device_info"]
@@ -32,6 +33,9 @@ async def async_setup_entry(
         BboxKnownDevicesSensor(coordinator, entry),
         BboxGuestNetworkSensor(coordinator, entry),
     ]
+    manager = manager_of(hass, entry)
+    if manager:
+        entities += build_parental("sensor", manager)
     async_add_entities(entities)
 
 

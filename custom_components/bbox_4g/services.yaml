@@ -111,3 +111,24 @@ create_dashboard:
               value: auto
             - label: Mushroom (nice UI)
               value: mushroom
+
+grant_extra_time:
+  name: Grant extra time
+  description: Lifts every parental-control restriction of a profile (schedule and quota) for a while.
+  fields:
+    profile:
+      name: Profile
+      description: Name of the parental-control profile.
+      required: true
+      example: "Léa"
+      selector:
+        text:
+    minutes:
+      name: Minutes
+      description: Duration of the override (default 60). 0 cancels a running override.
+      default: 60
+      selector:
+        number:
+          min: 0
+          max: 720
+          unit_of_measurement: min

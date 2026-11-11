@@ -36,6 +36,15 @@
     "step": {
       "init": {
         "title": "Bbox options",
+        "menu_options": {
+          "settings": "General settings",
+          "parental_add": "Parental control: add a profile",
+          "parental_edit": "Parental control: edit a profile",
+          "parental_remove": "Parental control: remove a profile"
+        }
+      },
+      "settings": {
+        "title": "Bbox options",
         "description": "Integration settings.\n\n• under_box (default): all client entities are attached to the Bbox device.\n• separate: each client becomes its own Home Assistant device.\n\nYou can still make individual devices independent via the « Independent device » switch.\n\nDashboards: select one or more variants to create in the sidebar (refresh the page after saving).",
         "data": {
           "scan_interval": "Polling interval (seconds)",
@@ -43,7 +52,40 @@
           "device_mode": "Default device mode for clients",
           "dashboards": "Dashboards to create in the sidebar"
         }
+      },
+      "parental_add": {
+        "title": "New parental-control profile",
+        "description": "A profile groups the devices of one person (phone, tablet, console…). They share the same bedtime windows and daily quota, which you then set from the profile's entities. The profile starts switched off.",
+        "data": {
+          "name": "Profile name",
+          "macs": "Devices"
+        }
+      },
+      "parental_edit": {
+        "title": "Edit a profile",
+        "data": {
+          "profile": "Profile"
+        }
+      },
+      "parental_edit_form": {
+        "title": "Edit the profile",
+        "data": {
+          "name": "Profile name",
+          "macs": "Devices"
+        }
+      },
+      "parental_remove": {
+        "title": "Remove a profile",
+        "description": "Devices blocked by this profile are released.",
+        "data": {
+          "profile": "Profile"
+        }
       }
+    },
+    "error": {
+      "name_required": "Enter a name.",
+      "name_exists": "A profile with this name already exists.",
+      "no_device": "Select at least one device."
     }
   },
   "services": {
@@ -130,6 +172,20 @@
         "dashboards": {
           "name": "Dashboards",
           "description": "One or more variants: native, auto, mushroom."
+        }
+      }
+    },
+    "grant_extra_time": {
+      "name": "Grant extra time",
+      "description": "Lifts every parental-control restriction of a profile (schedule and quota) for a while.",
+      "fields": {
+        "profile": {
+          "name": "Profile",
+          "description": "Name of the parental-control profile."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Duration of the override (default 60). 0 cancels a running override."
         }
       }
     }

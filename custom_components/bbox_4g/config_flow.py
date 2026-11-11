@@ -20,6 +20,7 @@ from .const import (
     CONF_FAMILY,
     CONF_HOST,
     CONF_PASSWORD,
+    CONF_PROFILES,
     CONF_SCAN_INTERVAL,
     CONF_USERNAME,
     CONF_USE_TLS,
@@ -41,7 +42,8 @@ from .const import (
     SCAN_INTERVAL_MAX,
     SCAN_INTERVAL_MIN,
 )
-from .dashboard import async_setup_selected_dashboards
+from .dashboard import _MAC_NAME_RE, async_setup_selected_dashboards
+from .helpers import slugify
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -178,9 +180,152 @@ class BboxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class BboxOptionsFlow(config_entries.OptionsFlow):
-    """Options : polling, blocage, mode appareils, dashboards."""
+    """Options : réglages, dashboards et contrôle parental (profils)."""
+
+    def __init__(self) -> None:
+        self._edit_id: str | None = None
+
+    # -- menu ---------------------------------------------------------------
 
     async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        menu = ["settings", "parental_add"]
+        if self._profiles():
+            menu += ["parental_edit", "parental_remove"]
+        return self.async_show_menu(step_id="init", menu_options=menu)
+
+    # -- parental control profiles -----------------------------------------
+
+    def _profiles(self) -> list[dict[str, Any]]:
+        return [dict(p) for p in (self.config_entry.options or {}).get(CONF_PROFILES) or []]
+
+    def _save_profiles(self, profiles: list[dict[str, Any]]) -> ConfigFlowResult:
+        options = {**(self.config_entry.options or {}), CONF_PROFILES: profiles}
+        return self.async_create_entry(title="", data=options)
+
+    def _device_choices(self, current: list[str]) -> dict[str, str]:
+        """Known devices not already used by another profile."""
+        taken = {
+            m.lower()
+            for p in self._profiles()
+            if p["id"] != self._edit_id
+            for m in p.get("macs") or []
+        }
+        coordinator = (
+            self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id) or {}
+        ).get("coordinator")
+        choices: dict[str, str] = {}
+        for dev in (coordinator.devices if coordinator else []):
+            mac = str(dev.get("mac") or "").lower()
+            if not mac or mac in taken:
+                continue
+            name = str(dev.get("name") or mac)
+            unnamed = bool(_MAC_NAME_RE.match(name))
+            choices[mac] = mac if unnamed else f"{name} ({mac[-5:]})"
+        for mac in current:  # keep devices that vanished from the router table
+            choices.setdefault(mac.lower(), mac)
+        return dict(sorted(choices.items(), key=lambda kv: kv[1].lower()))
+
+    def _profile_form(
+        self, step_id: str, name: str, macs: list[str], errors: dict[str, str]
+    ) -> ConfigFlowResult:
+        schema = vol.Schema(
+            {
+                vol.Required("name", default=name): str,
+                vol.Required("macs", default=macs): cv.multi_select(
+                    self._device_choices(macs)
+                ),
+            }
+        )
+        return self.async_show_form(step_id=step_id, data_schema=schema, errors=errors)
+
+    def _validate_profile(self, user_input: dict[str, Any]) -> dict[str, str]:
+        name = str(user_input.get("name") or "").strip()
+        if not name:
+            return {"base": "name_required"}
+        if any(
+            p["name"].lower() == name.lower() and p["id"] != self._edit_id
+            for p in self._profiles()
+        ):
+            return {"base": "name_exists"}
+        if not user_input.get("macs"):
+            return {"base": "no_device"}
+        return {}
+
+    async def async_step_parental_add(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        self._edit_id = None
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = self._validate_profile(user_input)
+            if not errors:
+                profiles = self._profiles()
+                base = f"p_{slugify(user_input['name'])}"
+                pid, n = base, 2
+                while any(p["id"] == pid for p in profiles):
+                    pid, n = f"{base}_{n}", n + 1
+                profiles.append(
+                    {
+                        "id": pid,
+                        "name": user_input["name"].strip(),
+                        "macs": sorted(m.lower() for m in user_input["macs"]),
+                    }
+                )
+                return self._save_profiles(profiles)
+        return self._profile_form(
+            "parental_add",
+            (user_input or {}).get("name", ""),
+            list((user_input or {}).get("macs", [])),
+            errors,
+        )
+
+    def _pick_form(self, step_id: str) -> ConfigFlowResult:
+        names = {p["id"]: p["name"] for p in self._profiles()}
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=vol.Schema({vol.Required("profile"): vol.In(names)}),
+        )
+
+    async def async_step_parental_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is None:
+            return self._pick_form("parental_edit")
+        self._edit_id = user_input["profile"]
+        return await self.async_step_parental_edit_form()
+
+    async def async_step_parental_edit_form(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        profiles = self._profiles()
+        current = next((p for p in profiles if p["id"] == self._edit_id), None)
+        if current is None:
+            return await self.async_step_init()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = self._validate_profile(user_input)
+            if not errors:
+                current["name"] = user_input["name"].strip()
+                current["macs"] = sorted(m.lower() for m in user_input["macs"])
+                return self._save_profiles(profiles)
+            current = {**current, **user_input}
+        return self._profile_form(
+            "parental_edit_form", current["name"], list(current.get("macs") or []), errors
+        )
+
+    async def async_step_parental_remove(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is None:
+            return self._pick_form("parental_remove")
+        profiles = [p for p in self._profiles() if p["id"] != user_input["profile"]]
+        return self._save_profiles(profiles)
+
+    # -- general settings -----------------------------------------------------
+
+    async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
@@ -194,6 +339,7 @@ class BboxOptionsFlow(config_entries.OptionsFlow):
             selected = [s for s in selected if s in DASHBOARD_CHOICES]
 
             new_options = {
+                **current_options,
                 CONF_SCAN_INTERVAL: max(
                     SCAN_INTERVAL_MIN, min(SCAN_INTERVAL_MAX, interval)
                 ),
@@ -246,4 +392,4 @@ class BboxOptionsFlow(config_entries.OptionsFlow):
                 ): cv.multi_select(DASHBOARD_LABELS),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="settings", data_schema=schema)

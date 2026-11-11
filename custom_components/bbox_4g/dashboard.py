@@ -34,6 +34,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
+from .parental import QUOTA_KEYS, TIME_KEYS
 from .const import (
     CONF_BLOCK_SCOPE,
     CONF_DASHBOARDS,
@@ -87,6 +88,11 @@ _TEXTS: dict[str, dict[str, str]] = {
         "guest": "Invité",
         "none_connected": "Aucun appareil connecté.",
         "none_blocked": "Aucun appareil bloqué.",
+        "parental": "Contrôle parental",
+        "pc_settings": "Réglages",
+        "pc_control": "Contrôle",
+        "pc_extra": "+1 h",
+        "pc_used": "min",
         "sw_internet": "Internet",
         "sw_wifi": "Wi-Fi",
         "sw_link": "Connexion",
@@ -119,6 +125,11 @@ _TEXTS: dict[str, dict[str, str]] = {
         "guest": "Guest",
         "none_connected": "No connected device.",
         "none_blocked": "No blocked device.",
+        "parental": "Parental control",
+        "pc_settings": "Settings",
+        "pc_control": "Control",
+        "pc_extra": "+1 h",
+        "pc_used": "min",
         "sw_internet": "Internet",
         "sw_wifi": "Wi-Fi",
         "sw_link": "Link",
@@ -230,6 +241,139 @@ def _label(txt: dict[str, str], dev: dict[str, Any]) -> str:
     return dev["name"]
 
 
+def _parental_profiles(hass: HomeAssistant) -> list[dict[str, Any]]:
+    """Parental-control profiles with the entity ids of their entities."""
+    txt = _t(hass)
+    reg = er.async_get(hass)
+    out: list[dict[str, Any]] = []
+    for value in (hass.data.get(DOMAIN) or {}).values():
+        manager = value.get("parental") if isinstance(value, dict) else None
+        if not manager:
+            continue
+        for prof in manager.profiles:
+            pid = prof["id"]
+
+            def ent(domain: str, key: str, pid: str = pid) -> str | None:
+                return _eid(reg, domain, f"parental_{pid}_{key}")
+
+            devices: list[dict[str, Any]] = []
+            for mac in prof["macs"]:
+                found = manager.coordinator.device_by_mac(mac) or {}
+                name = str(found.get("name") or "")
+                label = (
+                    f"{txt['unknown']} {mac[-5:].upper()}"
+                    if not name or _MAC_NAME_RE.match(name)
+                    else name
+                )
+                devices.append(
+                    {
+                        "label": label,
+                        "used": ent("sensor", f"{mac}_used"),
+                        "quotas": _only(
+                            [ent("number", f"{mac}_{k}") for k in QUOTA_KEYS]
+                        ),
+                    }
+                )
+            out.append(
+                {
+                    "name": prof["name"],
+                    "status": ent("sensor", "status"),
+                    "enabled": ent("switch", "enabled"),
+                    "override": ent("button", "override"),
+                    "times": _only([ent("time", k) for k in TIME_KEYS]),
+                    "devices": devices,
+                }
+            )
+    out.sort(key=lambda p: p["name"].lower())
+    return out
+
+
+def _parental_settings_rows(txt: dict[str, str], prof: dict[str, Any]) -> list[Any]:
+    """Settings rows: bedtime windows, then quota and usage of each device."""
+    rows: list[Any] = []
+    if prof["times"]:
+        rows += [{"type": "section", "label": txt["pc_settings"]}, *prof["times"]]
+    for dev in prof["devices"]:
+        entities = _only([dev["used"], *dev["quotas"]])
+        if entities:
+            rows += [{"type": "section", "label": dev["label"]}, *entities]
+    return rows
+
+
+def _parental_native_card(txt: dict[str, str], prof: dict[str, Any]) -> dict[str, Any]:
+    rows: list[Any] = _only([prof["status"], prof["enabled"], prof["override"]])
+    rows += _parental_settings_rows(txt, prof)
+    return {
+        "type": "entities",
+        "title": prof["name"],
+        "show_header_toggle": False,
+        "state_color": True,
+        "entities": rows,
+    }
+
+
+def _parental_mushroom_card(txt: dict[str, str], prof: dict[str, Any]) -> dict[str, Any]:
+    st, en, btn = prof["status"], prof["enabled"], prof["override"]
+    cards: list[dict[str, Any]] = []
+    if st:
+        code = f"state_attr('{st}', 'code')"
+        cards.append(
+            {
+                "type": "custom:mushroom-template-card",
+                "entity": st,
+                "primary": prof["name"],
+                "secondary": f"{{{{ states('{st}') }}}}",
+                "icon": f"{{{{ state_attr('{st}', 'icon') or 'mdi:shield-account' }}}}",
+                "icon_color": (
+                    f"{{% set c = {code} %}}"
+                    "{% if c == 'free' %}green{% elif c in ['schedule','quota'] %}red"
+                    "{% elif c == 'override' %}orange{% else %}grey{% endif %}"
+                ),
+                "tap_action": {"action": "more-info"},
+            }
+        )
+    chips: list[dict[str, Any]] = []
+    if en:
+        chips.append(
+            {
+                "type": "template",
+                "entity": en,
+                "icon": "mdi:shield-account",
+                "icon_color": f"{{{{ 'green' if is_state('{en}', 'on') else 'grey' }}}}",
+                "content": txt["pc_control"],
+                "tap_action": {"action": "toggle"},
+            }
+        )
+    if btn:
+        chips.append(
+            {
+                "type": "template",
+                "entity": btn,
+                "icon": "mdi:lock-clock",
+                "icon_color": "orange",
+                "content": txt["pc_extra"],
+                "tap_action": {
+                    "action": "perform-action",
+                    "perform_action": "button.press",
+                    "target": {"entity_id": btn},
+                },
+            }
+        )
+    if chips:
+        cards.append({"type": "custom:mushroom-chips-card", "chips": chips})
+    rows = _parental_settings_rows(txt, prof)
+    if rows:
+        cards.append(
+            {
+                "type": "entities",
+                "title": txt["pc_settings"],
+                "show_header_toggle": False,
+                "entities": rows,
+            }
+        )
+    return {"type": "vertical-stack", "cards": cards}
+
+
 def _switches(dev: dict[str, Any]) -> list[str]:
     return [dev[k] for k in ("internet", "wifi", "link") if dev.get(k)]
 
@@ -314,6 +458,7 @@ def _sections_view(
     *,
     devices: list[dict[str, Any]] | None = None,
     counts: bool = False,
+    parental: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     devices = devices or []
     hint_connected, hint_blocked = _empty_hints(txt, devices)
@@ -340,6 +485,13 @@ def _sections_view(
             "cards": [heading(txt["blocked"], "mdi:web-off", "blocked"), *blocked],
         },
     ]
+    if parental:
+        sections.append(
+            {
+                "type": "grid",
+                "cards": [heading(txt["parental"], "mdi:shield-account"), *parental],
+            }
+        )
     return {
         "views": [
             {
@@ -401,7 +553,10 @@ def _config_native(hass: HomeAssistant) -> dict[str, Any]:
         for d in devices
         if _switches(d)
     ]
-    return _sections_view(box_cards, txt, connected, blocked, devices=devices)
+    parental = [_parental_native_card(txt, p) for p in _parental_profiles(hass)]
+    return _sections_view(
+        box_cards, txt, connected, blocked, devices=devices, parental=parental
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -548,8 +703,15 @@ def _config_mushroom(hass: HomeAssistant) -> dict[str, Any]:
         for d in devices
         if _switches(d)
     ]
+    parental = [_parental_mushroom_card(txt, p) for p in _parental_profiles(hass)]
     return _sections_view(
-        box_cards, txt, connected, blocked, devices=devices, counts=True
+        box_cards,
+        txt,
+        connected,
+        blocked,
+        devices=devices,
+        counts=True,
+        parental=parental,
     )
 
 
@@ -576,6 +738,12 @@ def _auto_section(title: str, attrs: dict[str, str], domain_switch: bool = True)
 def _config_auto(hass: HomeAssistant) -> dict[str, Any]:
     txt = _t(hass)
     box = _box_entities(hass)
+    parental = []
+    for prof in _parental_profiles(hass):
+        card = _parental_native_card(txt, prof)
+        # no section heading in a masonry view: put it in the card title
+        card["title"] = f"{txt['parental']} – {prof['name']}"
+        parental.append(card)
     return {
         "views": [
             {
@@ -598,6 +766,7 @@ def _config_auto(hass: HomeAssistant) -> dict[str, Any]:
                     _auto_section(
                         txt["blocked"], {"appareil": "client", "acces": "coupe"}
                     ),
+                    *parental,
                 ],
             }
         ]

@@ -25,11 +25,13 @@ from homeassistant.exceptions import (
     HomeAssistantError,
 )
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_call_later
 
 from .bbox_api import BboxAuthError, BboxError, detect_client, wake_on_lan
 from .const import (
     ATTR_MAC,
     CONF_BLOCK_SCOPE,
+    CONF_DASHBOARDS,
     CONF_FAMILY,
     CONF_HOST,
     CONF_PASSWORD,
@@ -44,6 +46,7 @@ from .const import (
     PLATFORMS,
     SERVICE_BLOCK_DEVICE,
     SERVICE_CREATE_DASHBOARD,
+    SERVICE_GRANT_EXTRA_TIME,
     SERVICE_REFRESH,
     SERVICE_SET_INTERNET,
     SERVICE_SET_WIFI,
@@ -53,6 +56,7 @@ from .const import (
 )
 from .coordinator import BboxCoordinator
 from .dashboard import async_setup_selected_dashboards
+from .parental import OVERRIDE_MINUTES, QUOTA_MAX, ParentalManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,6 +74,14 @@ ACCESS_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_MAC): cv.string,
         vol.Required("allowed"): cv.boolean,
+    }
+)
+GRANT_SCHEMA = vol.Schema(
+    {
+        vol.Required("profile"): cv.string,
+        vol.Optional("minutes", default=OVERRIDE_MINUTES): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=QUOTA_MAX)
+        ),
     }
 )
 CREATE_DASHBOARD_SCHEMA = vol.Schema(
@@ -122,10 +134,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = BboxCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
 
-    hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator, "client": client}
+    parental = ParentalManager(hass, entry, coordinator)
+    hass.data[DOMAIN][entry.entry_id] = {
+        "coordinator": coordinator,
+        "client": client,
+        "parental": parental,
+    }
 
+    await parental.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+
+    # Rewrite the chosen dashboards once the entities (parental control
+    # included) are registered, so they always match the current profiles.
+    if (entry.options or {}).get(CONF_DASHBOARDS):
+
+        async def _refresh_dashboards(_now: Any) -> None:
+            await async_setup_selected_dashboards(
+                hass, list(entry.options[CONF_DASHBOARDS]), notify=False
+            )
+
+        entry.async_on_unload(async_call_later(hass, 20, _refresh_dashboards))
 
     _async_register_services(hass)
     return True
@@ -133,6 +162,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Décharge l'intégration."""
+    parental = (hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}).get("parental")
+    if parental:
+        await parental.async_stop()
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
@@ -259,7 +291,21 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 "No dashboard could be created. Check the logs for details."
             )
 
+    async def _grant(call: ServiceCall) -> None:
+        """Restore the access of a parental-control profile for a while."""
+        ref = call.data["profile"]
+        for data in hass.data.get(DOMAIN, {}).values():
+            manager = data.get("parental")
+            profile = manager.profile(ref) if manager else None
+            if profile:
+                await manager.async_grant(profile["id"], call.data["minutes"])
+                return
+        raise HomeAssistantError(f"Unknown parental-control profile: {ref}")
+
     hass.services.async_register(DOMAIN, SERVICE_REFRESH, _refresh)
+    hass.services.async_register(
+        DOMAIN, SERVICE_GRANT_EXTRA_TIME, _grant, schema=GRANT_SCHEMA
+    )
     hass.services.async_register(DOMAIN, SERVICE_WAKE_DEVICE, _wake)
     hass.services.async_register(DOMAIN, SERVICE_SET_INTERNET, _set_internet)
     hass.services.async_register(DOMAIN, SERVICE_SET_WIFI_ACCESS, _set_wifi_access)
