@@ -96,8 +96,14 @@ Chaque profil crée un appareil **Contrôle parental – <nom>** avec :
 | Heures **Coupure semaine / week-end – début / fin** | plages de coupure, possibles à cheval sur minuit (21:00 → 07:00). Début = fin : pas de plage |
 | Nombres **Quota semaine / week-end – <appareil>** | quota journalier en minutes **par appareil** (chaque appareil du profil a le sien), `0` = pas de quota |
 | Capteur **Statut** | `Libre`, `Coupé jusqu'à 07:00`, `Quota atteint`, `Dérogation jusqu'à 18:30`, `Désactivé` |
+| Capteurs **Temps restant – <appareil>** | temps restant aujourd'hui : `1 h 25`, `Épuisé` ou `Illimité` (pas de quota) |
 | Capteurs **Temps utilisé – <appareil>** | minutes comptées aujourd'hui pour chaque appareil |
-| Bouton **Rétablir 1 h** | lève toutes les restrictions pendant une heure |
+| Bouton **Rétablir 1 h** | lève toutes les restrictions du profil pendant une heure |
+| Interrupteur **Mode vacances** | applique la plage et le quota *week-end* tous les jours |
+| Nombre **Alerte avant fin de quota** | minutes avant la fin d'un quota où l'alerte se déclenche (`0` = désactivée) |
+| Boutons **+15 min de quota – <appareil>** | ajoute 15 minutes au quota du jour de cet appareil (fin à minuit) |
+| Boutons **Rétablir 1 h – <appareil>** | lève les restrictions de cet appareil seulement, pendant une heure |
+| Événement **Alertes** | `quota_warning`, `quota_reached`, `bedtime_start`, `bedtime_end`, `override_started` (voir plus bas) |
 
 Fonctionnement :
 
@@ -110,6 +116,33 @@ Fonctionnement :
 
 Service : `bbox_4g.grant_extra_time` (`profil` → champ `profile`, `minutes` — 60 par défaut, `0` annule).
 
+### Alertes et statistiques
+
+- L'entité événement **Alertes** de chaque profil déclenche `quota_warning` (avec les minutes restantes), `quota_reached`, `bedtime_start`, `bedtime_end` et `override_started`. Utilisez-la comme déclencheur d'automatisation ; le nom de l'appareil, la MAC et les minutes sont dans les données de l'événement.
+- La box a une entité événement **Nouvel appareil** (`new_device`) déclenchée quand un appareil jamais vu rejoint le réseau (nom, MAC, IP, liaison). Les appareils déjà connus ne sont pas signalés au premier démarrage.
+- Les capteurs **Temps utilisé** alimentent les statistiques à long terme de Home Assistant : historique par jour, semaine ou mois.
+
+```yaml
+automation:
+  - alias: Quota de Léa bientôt fini
+    triggers:
+      - trigger: state
+        entity_id: event.controle_parental_lea_alertes
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.to_state.attributes.event_type == 'quota_warning' }}"
+    actions:
+      - action: notify.mobile_app_mon_telephone
+        data:
+          message: "{{ trigger.to_state.attributes.device }} : {{ trigger.to_state.attributes.remaining_min }} min restantes"
+```
+
+### Autres fonctions
+
+- **Renommer des appareils** : *Configurer → Renommer des appareils*. Le nom remplace celui de la box dans les entités, tableaux de bord et alertes (vide = nom de la box).
+- **Minuteur Wi-Fi** `bbox_4g.wifi_timer` (`band` : `all`, `24`, `5`, `guest` ; `minutes`) : allume une bande maintenant et l'éteint après le délai ; survit à un redémarrage ; `0` annule. Le réseau invité ne fonctionne que si la box l'expose (pas sur tous les modèles Huawei : une erreur claire est renvoyée sinon).
+- Services `bbox_4g.add_quota_time` (`profile`, `device` facultatif, `minutes`) et `bbox_4g.grant_extra_time` (`device` facultatif).
+
 ## Services
 
 | Service | Arguments |
@@ -120,7 +153,9 @@ Service : `bbox_4g.grant_extra_time` (`profil` → champ `profile`, `minutes` �
 | `bbox_4g.set_internet_access` | `mac`, `allowed` |
 | `bbox_4g.set_wifi_access` | `mac`, `allowed` |
 | `bbox_4g.wake_device` | `mac` |
-| `bbox_4g.grant_extra_time` | `profile`, `minutes` |
+| `bbox_4g.grant_extra_time` | `profile`, `device` (facultatif), `minutes` |
+| `bbox_4g.add_quota_time` | `profile`, `device` (facultatif), `minutes` |
+| `bbox_4g.wifi_timer` | `band`, `minutes` |
 | `bbox_4g.create_dashboard` | `dashboards` (`native`, `auto`, `mushroom`) |
 
 ```yaml

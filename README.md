@@ -98,8 +98,14 @@ Each profile creates a device **Contrôle parental – <name>** with:
 | Times **Coupure semaine / week-end – début / fin** | bedtime windows, may span midnight (21:00 → 07:00). Same start and end = no window |
 | Numbers **Quota semaine / week-end – <device>** | daily quota in minutes **per device** (each device of the profile has its own), `0` = no quota |
 | Sensor **Statut** | `Libre`, `Coupé jusqu'à 07:00`, `Quota atteint`, `Dérogation jusqu'à 18:30`, `Désactivé` |
+| Sensors **Temps restant – <device>** | time left today: `1 h 25`, `Épuisé` or `Illimité` (no quota) |
 | Sensors **Temps utilisé – <device>** | minutes counted today for each device |
-| Button **Rétablir 1 h** | lifts every restriction for one hour |
+| Button **Rétablir 1 h** | lifts every restriction of the profile for one hour |
+| Switch **Mode vacances** | uses the *weekend* window and quota every day |
+| Number **Alerte avant fin de quota** | minutes before a quota ends when the alert fires (`0` = off) |
+| Buttons **+15 min de quota – <device>** | adds 15 minutes to today's quota of that device (ends at midnight) |
+| Buttons **Rétablir 1 h – <device>** | lifts the restrictions of that device only, for one hour |
+| Event **Alertes** | `quota_warning`, `quota_reached`, `bedtime_start`, `bedtime_end`, `override_started` (see below) |
 
 How it works:
 
@@ -112,6 +118,33 @@ How it works:
 
 Service: `bbox_4g.grant_extra_time` (`profile`, `minutes` — default 60, `0` cancels).
 
+### Alerts and statistics
+
+- The **Alertes** event entity of each profile fires `quota_warning` (with the minutes left), `quota_reached`, `bedtime_start`, `bedtime_end` and `override_started`. Use it as an automation trigger; the device name, MAC and minutes are in the event data.
+- The box has an event entity **Nouvel appareil** (`new_device`) fired when a device never seen before joins the network (name, MAC, IP, link). Existing devices are not reported at first start.
+- **Temps utilisé** sensors feed Home Assistant long-term statistics: history per day, week or month in the Energy-style statistics graph.
+
+```yaml
+automation:
+  - alias: Léa quota almost over
+    triggers:
+      - trigger: state
+        entity_id: event.controle_parental_lea_alertes
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.to_state.attributes.event_type == 'quota_warning' }}"
+    actions:
+      - action: notify.mobile_app_my_phone
+        data:
+          message: "{{ trigger.to_state.attributes.device }}: {{ trigger.to_state.attributes.remaining_min }} min left"
+```
+
+### Other features
+
+- **Rename devices**: *Configure → Rename devices*. The name replaces the router's one in entities, dashboards and alerts (empty = router's name).
+- **Wi-Fi timer** `bbox_4g.wifi_timer` (`band`: `all`, `24`, `5`, `guest`; `minutes`): switches a band on now and off again after the delay; survives a restart; `0` cancels. The guest network works only where the box exposes it (not on every Huawei model: you get a clear error otherwise).
+- Services `bbox_4g.add_quota_time` (`profile`, optional `device`, `minutes`) and `bbox_4g.grant_extra_time` (optional `device`).
+
 ## Services
 
 | Service | Arguments |
@@ -122,7 +155,9 @@ Service: `bbox_4g.grant_extra_time` (`profile`, `minutes` — default 60, `0` ca
 | `bbox_4g.set_internet_access` | `mac`, `allowed` |
 | `bbox_4g.set_wifi_access` | `mac`, `allowed` |
 | `bbox_4g.wake_device` | `mac` |
-| `bbox_4g.grant_extra_time` | `profile`, `minutes` |
+| `bbox_4g.grant_extra_time` | `profile`, `device` (optional), `minutes` |
+| `bbox_4g.add_quota_time` | `profile`, `device` (optional), `minutes` |
+| `bbox_4g.wifi_timer` | `band`, `minutes` |
 | `bbox_4g.create_dashboard` | `dashboards` (`native`, `auto`, `mushroom`) |
 
 ```yaml
