@@ -89,10 +89,27 @@ _TEXTS: dict[str, dict[str, str]] = {
         "none_connected": "Aucun appareil connecté.",
         "none_blocked": "Aucun appareil bloqué.",
         "parental": "Contrôle parental",
-        "pc_settings": "Réglages",
+        "pc_windows": "Plages de coupure",
         "pc_control": "Contrôle",
         "pc_extra": "+1 h",
-        "pc_used": "min",
+        "pc_status": "Statut",
+        "pc_enabled": "Contrôle activé",
+        "pc_override": "Rétablir 1 h",
+        "pc_week": "Semaine",
+        "pc_weekend": "Week-end",
+        "pc_wk_start": "Semaine : coupure à",
+        "pc_wk_end": "Semaine : rétablissement à",
+        "pc_we_start": "Week-end : coupure à",
+        "pc_we_end": "Week-end : rétablissement à",
+        "pc_quota_wk": "Quota semaine",
+        "pc_quota_we": "Quota week-end",
+        "pc_used": "Temps utilisé",
+        "pc_remaining": "Temps restant",
+        "pc_holiday": "Mode vacances",
+        "pc_warn": "Alerte avant fin de quota",
+        "pc_bonus": "+15 min de quota",
+        "pc_dev_override": "Rétablir 1 h",
+        "pc_left_today": "Temps restant aujourd'hui",
         "sw_internet": "Internet",
         "sw_wifi": "Wi-Fi",
         "sw_link": "Connexion",
@@ -126,10 +143,27 @@ _TEXTS: dict[str, dict[str, str]] = {
         "none_connected": "No connected device.",
         "none_blocked": "No blocked device.",
         "parental": "Parental control",
-        "pc_settings": "Settings",
+        "pc_windows": "Bedtime windows",
         "pc_control": "Control",
         "pc_extra": "+1 h",
-        "pc_used": "min",
+        "pc_status": "Status",
+        "pc_enabled": "Control enabled",
+        "pc_override": "Restore for 1 h",
+        "pc_week": "Weekdays",
+        "pc_weekend": "Weekend",
+        "pc_wk_start": "Weekdays: cut at",
+        "pc_wk_end": "Weekdays: restore at",
+        "pc_we_start": "Weekend: cut at",
+        "pc_we_end": "Weekend: restore at",
+        "pc_quota_wk": "Weekday quota",
+        "pc_quota_we": "Weekend quota",
+        "pc_used": "Time used",
+        "pc_remaining": "Time left",
+        "pc_holiday": "Holiday mode",
+        "pc_warn": "Alert before quota ends",
+        "pc_bonus": "+15 min quota",
+        "pc_dev_override": "Restore for 1 h",
+        "pc_left_today": "Time left today",
         "sw_internet": "Internet",
         "sw_wifi": "Wi-Fi",
         "sw_link": "Link",
@@ -269,9 +303,12 @@ def _parental_profiles(hass: HomeAssistant) -> list[dict[str, Any]]:
                     {
                         "label": label,
                         "used": ent("sensor", f"{mac}_used"),
-                        "quotas": _only(
-                            [ent("number", f"{mac}_{k}") for k in QUOTA_KEYS]
-                        ),
+                        "remaining": ent("sensor", f"{mac}_remaining"),
+                        "bonus": ent("button", f"{mac}_bonus"),
+                        "override": ent("button", f"{mac}_override"),
+                        "quotas": {
+                            k: ent("number", f"{mac}_{k}") for k in QUOTA_KEYS
+                        },
                     }
                 )
             out.append(
@@ -280,7 +317,9 @@ def _parental_profiles(hass: HomeAssistant) -> list[dict[str, Any]]:
                     "status": ent("sensor", "status"),
                     "enabled": ent("switch", "enabled"),
                     "override": ent("button", "override"),
-                    "times": _only([ent("time", k) for k in TIME_KEYS]),
+                    "holiday": ent("switch", "holiday"),
+                    "warn": ent("number", "warn_min"),
+                    "times": {k: ent("time", k) for k in TIME_KEYS},
                     "devices": devices,
                 }
             )
@@ -289,27 +328,70 @@ def _parental_profiles(hass: HomeAssistant) -> list[dict[str, Any]]:
 
 
 def _parental_settings_rows(txt: dict[str, str], prof: dict[str, Any]) -> list[Any]:
-    """Settings rows: bedtime windows, then quota and usage of each device."""
+    """Settings rows (explicit names: the default ones are too long and get cut)."""
     rows: list[Any] = []
-    if prof["times"]:
-        rows += [{"type": "section", "label": txt["pc_settings"]}, *prof["times"]]
+    times = [
+        {"entity": e, "name": txt[f"pc_{k}"]} for k, e in prof["times"].items() if e
+    ]
+    if times:
+        rows += [{"type": "section", "label": txt["pc_windows"]}, *times]
     for dev in prof["devices"]:
-        entities = _only([dev["used"], *dev["quotas"]])
+        entities: list[Any] = []
+        if dev.get("remaining"):
+            entities.append({"entity": dev["remaining"], "name": txt["pc_remaining"]})
+        if dev["used"]:
+            entities.append({"entity": dev["used"], "name": txt["pc_used"]})
+        for k, e in dev["quotas"].items():
+            if e:
+                entities.append(
+                    {"entity": e, "name": txt["pc_quota_wk" if k == "wk_quota" else "pc_quota_we"]}
+                )
+        if dev.get("bonus"):
+            entities.append({"entity": dev["bonus"], "name": txt["pc_bonus"]})
+        if dev.get("override"):
+            entities.append({"entity": dev["override"], "name": txt["pc_dev_override"]})
         if entities:
             rows += [{"type": "section", "label": dev["label"]}, *entities]
+    if prof.get("warn"):
+        rows.append({"entity": prof["warn"], "name": txt["pc_warn"]})
     return rows
 
 
+def _parental_left_card(txt: dict[str, str], prof: dict[str, Any]) -> dict[str, Any] | None:
+    """Small table: time left today for each device of the profile."""
+    rows = [
+        f"| {d['label']} | {{{{ states('{d['remaining']}') }}}} |"
+        for d in prof["devices"]
+        if d.get("remaining")
+    ]
+    if not rows:
+        return None
+    table = "\n".join([f"| {txt['pc_left_today']} | |", "|:--|--:|", *rows])
+    return {"type": "markdown", "content": table}
+
+
 def _parental_native_card(txt: dict[str, str], prof: dict[str, Any]) -> dict[str, Any]:
-    rows: list[Any] = _only([prof["status"], prof["enabled"], prof["override"]])
+    rows: list[Any] = []
+    for key, label in (
+        ("status", "pc_status"),
+        ("enabled", "pc_enabled"),
+        ("holiday", "pc_holiday"),
+        ("override", "pc_override"),
+    ):
+        if prof[key]:
+            rows.append({"entity": prof[key], "name": txt[label]})
     rows += _parental_settings_rows(txt, prof)
-    return {
+    card: dict[str, Any] = {
         "type": "entities",
         "title": prof["name"],
         "show_header_toggle": False,
         "state_color": True,
         "entities": rows,
     }
+    left = _parental_left_card(txt, prof)
+    if left:
+        return {"type": "vertical-stack", "cards": [card, left]}
+    return card
 
 
 def _parental_mushroom_card(txt: dict[str, str], prof: dict[str, Any]) -> dict[str, Any]:
@@ -317,12 +399,22 @@ def _parental_mushroom_card(txt: dict[str, str], prof: dict[str, Any]) -> dict[s
     cards: list[dict[str, Any]] = []
     if st:
         code = f"state_attr('{st}', 'code')"
+        t = prof["times"]
+        summary = ""
+        if all(t.get(k) for k in TIME_KEYS):
+            def span(a: str, b: str) -> str:
+                return f"{{{{ states('{t[a]}')[:5] }}}}–{{{{ states('{t[b]}')[:5] }}}}"
+
+            summary = (
+                f" · {txt['pc_week']} {span('wk_start', 'wk_end')}"
+                f" · {txt['pc_weekend']} {span('we_start', 'we_end')}"
+            )
         cards.append(
             {
                 "type": "custom:mushroom-template-card",
                 "entity": st,
                 "primary": prof["name"],
-                "secondary": f"{{{{ states('{st}') }}}}",
+                "secondary": f"{{{{ states('{st}') }}}}{summary}",
                 "icon": f"{{{{ state_attr('{st}', 'icon') or 'mdi:shield-account' }}}}",
                 "icon_color": (
                     f"{{% set c = {code} %}}"
@@ -344,13 +436,28 @@ def _parental_mushroom_card(txt: dict[str, str], prof: dict[str, Any]) -> dict[s
                 "tap_action": {"action": "toggle"},
             }
         )
+    hol = prof.get("holiday")
+    if hol:
+        chips.append(
+            {
+                "type": "template",
+                "entity": hol,
+                "icon": "mdi:beach",
+                "icon_color": f"{{{{ 'amber' if is_state('{hol}', 'on') else 'grey' }}}}",
+                "content": txt["pc_holiday"],
+                "tap_action": {"action": "toggle"},
+            }
+        )
     if btn:
         chips.append(
             {
                 "type": "template",
                 "entity": btn,
                 "icon": "mdi:lock-clock",
-                "icon_color": "orange",
+                "icon_color": (
+                    f"{{{{ 'orange' if state_attr('{st}', 'code') in ['schedule', 'quota'] "
+                    "else 'grey' }}"
+                ) if st else "orange",
                 "content": txt["pc_extra"],
                 "tap_action": {
                     "action": "perform-action",
@@ -361,12 +468,14 @@ def _parental_mushroom_card(txt: dict[str, str], prof: dict[str, Any]) -> dict[s
         )
     if chips:
         cards.append({"type": "custom:mushroom-chips-card", "chips": chips})
+    left = _parental_left_card(txt, prof)
+    if left:
+        cards.append(left)
     rows = _parental_settings_rows(txt, prof)
     if rows:
         cards.append(
             {
                 "type": "entities",
-                "title": txt["pc_settings"],
                 "show_header_toggle": False,
                 "entities": rows,
             }
@@ -394,7 +503,14 @@ def _box_rows(box: dict[str, str | None]) -> list[str]:
 
 
 def _cond_connected(dev: dict[str, Any]) -> list[dict[str, Any]]:
-    return [{"condition": "state", "entity": dev["presence"], "state": "on"}]
+    """Online and not blocked (a blocked device is listed under "Blocked" only)."""
+    return [
+        {"condition": "state", "entity": dev["presence"], "state": "on"},
+        *(
+            {"condition": "state", "entity": e, "state_not": "off"}
+            for e in _switches(dev)
+        ),
+    ]
 
 
 def _cond_blocked(dev: dict[str, Any]) -> list[dict[str, Any]]:
@@ -417,8 +533,19 @@ def _empty_hints(
     """Helper texts shown only while a section would otherwise be empty."""
     if not devices:
         return [], []
+    # "no connected device" = for every device: offline OR blocked
     none_on = [
-        {"condition": "state", "entity": d["presence"], "state": "off"} for d in devices
+        {
+            "condition": "or",
+            "conditions": [
+                {"condition": "state", "entity": d["presence"], "state_not": "on"},
+                *(
+                    {"condition": "state", "entity": e, "state": "off"}
+                    for e in _switches(d)
+                ),
+            ],
+        }
+        for d in devices
     ]
     none_off = [
         {"condition": "state", "entity": e, "state_not": "off"}
@@ -440,13 +567,15 @@ def _count_template(devices: list[dict[str, Any]], kind: str) -> str:
     """Jinja expression: number of connected / blocked devices."""
     parts: list[str] = []
     for d in devices:
+        sw = _switches(d)
+        cut = " or ".join(f"is_state('{e}', 'off')" for e in sw)
         if kind == "connected":
-            parts.append(f"(is_state('{d['presence']}', 'on') | int(0))")
-        else:
-            sw = _switches(d)
-            if sw:
-                cond = " or ".join(f"is_state('{e}', 'off')" for e in sw)
-                parts.append(f"(({cond}) | int(0))")
+            expr = f"is_state('{d['presence']}', 'on')"
+            if cut:
+                expr += f" and not ({cut})"
+            parts.append(f"(({expr}) | int(0))")
+        elif cut:
+            parts.append(f"(({cut}) | int(0))")
     return "{{ " + (" + ".join(parts) if parts else "0") + " }}"
 
 
@@ -466,12 +595,12 @@ def _sections_view(
     blocked = [*blocked, *hint_blocked]
 
     def heading(title: str, icon: str, kind: str = "") -> dict[str, Any]:
-        if counts and kind and devices:
-            # Mushroom title cards accept templates: "Connected devices (3)"
-            return {
-                "type": "custom:mushroom-title-card",
-                "title": f"{title} ({_count_template(devices, kind)})",
-            }
+        if counts:
+            # Mushroom title cards accept templates: "Connected devices (3)".
+            # Used for every section so the headings look the same.
+            if kind and devices:
+                title = f"{title} ({_count_template(devices, kind)})"
+            return {"type": "custom:mushroom-title-card", "title": title}
         return {"type": "heading", "heading": title, "icon": icon, "heading_style": "title"}
 
     sections = [
@@ -742,7 +871,8 @@ def _config_auto(hass: HomeAssistant) -> dict[str, Any]:
     for prof in _parental_profiles(hass):
         card = _parental_native_card(txt, prof)
         # no section heading in a masonry view: put it in the card title
-        card["title"] = f"{txt['parental']} – {prof['name']}"
+        first = card["cards"][0] if card["type"] == "vertical-stack" else card
+        first["title"] = f"{txt['parental']} – {prof['name']}"
         parental.append(card)
     return {
         "views": [

@@ -20,6 +20,7 @@ CONF_DASHBOARDS = "dashboards"  # list: native, auto, mushroom
 CONF_DEVICE_MODE = "device_mode"
 CONF_SEPARATE_MACS = "separate_macs"
 CONF_PROFILES = "profiles"  # parental control profiles
+CONF_DEVICE_NAMES = "device_names"  # {mac: custom name}
 
 DEFAULT_HOST = "192.168.1.1"
 DEFAULT_USERNAME = "admin"
@@ -52,6 +53,7 @@ PLATFORMS = [
     "button",
     "number",
     "time",
+    "event",
 ]
 
 ATTR_MAC = "mac"
@@ -74,3 +76,5 @@ SERVICE_SET_INTERNET = "set_internet_access"
 SERVICE_SET_WIFI_ACCESS = "set_wifi_access"
 SERVICE_CREATE_DASHBOARD = "create_dashboard"
 SERVICE_GRANT_EXTRA_TIME = "grant_extra_time"
+SERVICE_ADD_QUOTA_TIME = "add_quota_time"
+SERVICE_WIFI_TIMER = "wifi_timer"

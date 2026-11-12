@@ -47,6 +47,7 @@ TICK = timedelta(minutes=1)
 MAX_ELAPSED = 180
 
 OVERRIDE_MINUTES = 60
+BONUS_MINUTES = 15
 QUOTA_MAX = 720
 
 # Status codes
@@ -63,6 +64,8 @@ DEFAULTS: dict[str, Any] = {
     "we_start": "22:00",
     "we_end": "08:00",
     "override_until": "",
+    "holiday": False,  # use the weekend rules every day
+    "warn_min": 10,  # "quota almost over" alert (0 = off)
     "owned": [],  # MAC addresses blocked by the engine
 }
 
@@ -75,6 +78,9 @@ DEVICE_DEFAULTS: dict[str, Any] = {
     "we_quota": 0,
     "used": 0.0,  # seconds used today
     "used_date": "",
+    "bonus": 0,  # extra minutes granted today
+    "warned_date": "",  # day of the last "quota almost over" alert
+    "override_until": "",  # "restore for 1 h" for this device only
 }
 
 
@@ -88,21 +94,24 @@ def parse_hhmm(value: str) -> time:
     return time(int(hour), int(minute))
 
 
-def night_kind(day: date) -> str:
-    """Window used by a block *starting* on ``day`` (Friday, Saturday = weekend)."""
-    return "we" if day.weekday() in (4, 5) else "wk"
+def night_kind(day: date, holiday: bool = False) -> str:
+    """Window used by a block *starting* on ``day`` (Friday, Saturday = weekend).
+
+    In holiday mode the weekend window is used every day.
+    """
+    return "we" if holiday or day.weekday() in (4, 5) else "wk"
 
 
-def quota_kind(day: date) -> str:
-    """Quota used on ``day`` (Saturday, Sunday = weekend)."""
-    return "we" if day.weekday() in (5, 6) else "wk"
+def quota_kind(day: date, holiday: bool = False) -> str:
+    """Quota used on ``day`` (Saturday, Sunday = weekend; holidays: always)."""
+    return "we" if holiday or day.weekday() in (5, 6) else "wk"
 
 
 def block_window(cfg: dict[str, Any], now: datetime) -> tuple[datetime, datetime] | None:
     """The bedtime window containing ``now`` as ``(start, end)``, if any."""
     for offset in (0, -1):
         day = now.date() + timedelta(days=offset)
-        kind = night_kind(day)
+        kind = night_kind(day, bool(cfg.get("holiday")))
         start_t = parse_hhmm(cfg[f"{kind}_start"])
         end_t = parse_hhmm(cfg[f"{kind}_end"])
         if start_t == end_t:
@@ -115,8 +124,8 @@ def block_window(cfg: dict[str, Any], now: datetime) -> tuple[datetime, datetime
     return None
 
 
-def quota_minutes(cfg: dict[str, Any], day: date) -> int:
-    return int(cfg.get(f"{quota_kind(day)}_quota") or 0)
+def quota_minutes(dcfg: dict[str, Any], day: date, holiday: bool = False) -> int:
+    return int(dcfg.get(f"{quota_kind(day, holiday)}_quota") or 0)
 
 
 @dataclass
@@ -148,20 +157,42 @@ class DeviceState:
     allowed: bool
     until: datetime | None
     used_min: float
-    quota_min: int
+    quota_min: int  # today's quota including the bonus (0 = unlimited)
+    bonus_min: int = 0
 
 
 def device_state(cfg: dict[str, Any], dcfg: dict[str, Any], now: datetime) -> DeviceState:
     """State of one device: the profile rules, then the device's own quota."""
     profile = compute_state(cfg, now)
-    quota = quota_minutes(dcfg, now.date())
+    base = quota_minutes(dcfg, now.date(), bool(cfg.get("holiday")))
+    bonus = int(dcfg.get("bonus") or 0) if base > 0 else 0
+    quota = base + bonus
     used = float(dcfg.get("used") or 0) / 60
+    if profile.status not in (DISABLED, OVERRIDE):
+        own = _parse_dt(dcfg.get("override_until"))
+        if own and own > now:  # "restore for 1 h" for this device only
+            return DeviceState(OVERRIDE, True, own, used, quota, bonus)
     if profile.status == FREE and quota > 0 and used >= quota:
         midnight = datetime.combine(
             now.date() + timedelta(days=1), time(0), tzinfo=now.tzinfo
         )
-        return DeviceState(QUOTA, False, midnight, used, quota)
-    return DeviceState(profile.status, profile.allowed, profile.until, used, quota)
+        return DeviceState(QUOTA, False, midnight, used, quota, bonus)
+    return DeviceState(profile.status, profile.allowed, profile.until, used, quota, bonus)
+
+
+def format_minutes(minutes: float) -> str:
+    """``85`` -> ``1 h 25``, ``45`` -> ``45 min``."""
+    total = max(int(round(minutes)), 0)
+    hours, mins = divmod(total, 60)
+    return f"{hours} h {mins:02d}" if hours else f"{mins} min"
+
+
+def remaining_text(state: "DeviceState") -> str:
+    """Time left today for a device: ``1 h 25``, ``Épuisé`` or ``Illimité``."""
+    if state.quota_min <= 0:
+        return "Illimité"
+    left = state.quota_min - state.used_min
+    return "Épuisé" if left <= 0.5 else format_minutes(left)
 
 
 def _parse_dt(value: Any) -> datetime | None:
@@ -207,6 +238,10 @@ class ParentalManager:
         self._last_tick: float | None = None
         self._last_error = ""
         self._orphans: dict[str, list[str]] = {}
+        self._event_listeners: list[Callable[[str | None, str, dict[str, Any]], None]] = []
+        self._prev_dev: dict[tuple[str, str], str] = {}
+        self._prev_prof: dict[str, str] = {}
+        self._known_macs: set[str] | None = None
 
     # -- profiles -----------------------------------------------------------
 
@@ -286,6 +321,8 @@ class ParentalManager:
             for pid, cfg in (stored.get("profiles") or {}).items()
             if isinstance(cfg, dict)
         }
+        if isinstance(stored.get("known_macs"), list):
+            self._known_macs = {str(m).lower() for m in stored["known_macs"]}
         known = {p["id"] for p in self.profiles}
         # Profile deleted while we had devices blocked: release them below.
         self._orphans = {
@@ -312,13 +349,44 @@ class ParentalManager:
     async def _async_tick(self, _now: datetime) -> None:
         await self.async_evaluate()
 
+    def _payload(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"profiles": self._data}
+        if self._known_macs is not None:
+            out["known_macs"] = sorted(self._known_macs)
+        return out
+
     async def async_stop(self) -> None:
         """Write pending changes (called before an unload / reload)."""
-        await self._store.async_save({"profiles": self._data})
+        await self._store.async_save(self._payload())
 
     @callback
     def _save(self) -> None:
-        self._store.async_delay_save(lambda: {"profiles": self._data}, 10)
+        self._store.async_delay_save(self._payload, 10)
+
+    # -- events (alerts) -------------------------------------------------------
+
+    @callback
+    def async_add_event_listener(
+        self, listener: Callable[[str | None, str, dict[str, Any]], None]
+    ) -> Callable[[], None]:
+        self._event_listeners.append(listener)
+
+        @callback
+        def _remove() -> None:
+            if listener in self._event_listeners:
+                self._event_listeners.remove(listener)
+
+        return _remove
+
+    @callback
+    def _emit(self, pid: str | None, event: str, data: dict[str, Any]) -> None:
+        """Alert for the profile ``pid`` (``None`` = box level)."""
+        for listener in list(self._event_listeners):
+            listener(pid, event, data)
+
+    def device_label(self, mac: str) -> str:
+        device = self.coordinator.device_by_mac(mac) or {}
+        return str(device.get("name") or mac)
 
     # -- changes made by the entities ---------------------------------------
 
@@ -334,16 +402,51 @@ class ParentalManager:
         self._notify()
         await self.async_evaluate()
 
-    async def async_grant(self, pid: str, minutes: int) -> None:
-        """Lift every restriction for ``minutes`` (``0`` cancels the override)."""
-        cfg = self.cfg(pid)
+    async def async_grant(self, pid: str, minutes: int, mac: str | None = None) -> None:
+        """Lift the restrictions for ``minutes`` (``0`` cancels the override).
+
+        For the whole profile, or for one device only when ``mac`` is given.
+        """
+        target = self.dcfg(pid, mac) if mac else self.cfg(pid)
         if minutes > 0:
-            cfg["override_until"] = (dt_util.now() + timedelta(minutes=minutes)).isoformat()
+            until = dt_util.now() + timedelta(minutes=minutes)
+            target["override_until"] = until.isoformat()
+            self._emit(
+                pid,
+                "override_started",
+                {"device": self.device_label(mac) if mac else None, "mac": mac,
+                 "minutes": minutes, "until": until.isoformat()},
+            )
         else:
-            cfg["override_until"] = ""
+            target["override_until"] = ""
         self._save()
         self._notify()
         await self.async_evaluate()
+
+    async def async_add_bonus(self, pid: str, minutes: int, mac: str | None = None) -> int:
+        """Add ``minutes`` to today's quota (one device or the whole profile).
+
+        Devices without a quota (unlimited) are left alone. Returns how many
+        devices received the bonus.
+        """
+        prof = next((p for p in self.profiles if p["id"] == pid), None)
+        if prof is None:
+            return 0
+        now = dt_util.now()
+        cfg = self.cfg(pid)
+        granted = 0
+        for target in [mac.lower()] if mac else prof["macs"]:
+            dcfg = self.dcfg(pid, target)
+            if quota_minutes(dcfg, now.date(), bool(cfg.get("holiday"))) <= 0:
+                continue
+            dcfg["bonus"] = min(int(dcfg.get("bonus") or 0) + minutes, QUOTA_MAX)
+            dcfg["warned_date"] = ""  # the "almost over" alert may fire again
+            granted += 1
+        if granted:
+            self._save()
+            self._notify()
+            await self.async_evaluate()
+        return granted
 
     # -- engine ----------------------------------------------------------------
 
@@ -371,11 +474,23 @@ class ParentalManager:
             in_profile.update(prof["macs"])
 
             today = now.date().isoformat()
+            pid = prof["id"]
+            pstate = compute_state(cfg, now)
+            prev_p = self._prev_prof.get(pid)
+            if prev_p is not None and prev_p != pstate.status:
+                if pstate.status == SCHEDULE:
+                    self._emit(pid, "bedtime_start", {"until": pstate.until.isoformat() if pstate.until else None})
+                elif prev_p == SCHEDULE:
+                    self._emit(pid, "bedtime_end", {})
+            self._prev_prof[pid] = pstate.status
+
             for mac in prof["macs"]:
-                dcfg = self.dcfg(prof["id"], mac)
+                dcfg = self.dcfg(pid, mac)
                 if dcfg["used_date"] != today:
                     dcfg["used"] = 0.0
                     dcfg["used_date"] = today
+                    dcfg["bonus"] = 0
+                    dcfg["warned_date"] = ""
                 state = device_state(cfg, dcfg, now)
                 # Quota: each device counts its own time, while it is online
                 # and allowed.
@@ -383,6 +498,26 @@ class ParentalManager:
                     if self._online(mac):
                         dcfg["used"] = float(dcfg["used"]) + elapsed
                         state = device_state(cfg, dcfg, now)
+
+                # Alerts
+                key = (pid, mac)
+                prev = self._prev_dev.get(key)
+                data = {
+                    "device": self.device_label(mac),
+                    "mac": mac,
+                    "quota_min": state.quota_min,
+                    "used_min": round(state.used_min),
+                }
+                if prev is not None and state.status == QUOTA and prev != QUOTA:
+                    self._emit(pid, "quota_reached", data)
+                self._prev_dev[key] = state.status
+                warn = int(cfg.get("warn_min") or 0)
+                if warn > 0 and state.status == FREE and state.quota_min > 0:
+                    left = state.quota_min - state.used_min
+                    if 0 < left <= warn and dcfg.get("warned_date") != today:
+                        dcfg["warned_date"] = today
+                        self._emit(pid, "quota_warning", {**data, "remaining_min": round(left)})
+
                 changed |= await self._apply(cfg, mac, not state.allowed)
 
         # Devices removed from a profile (or whose profile was deleted).
@@ -399,8 +534,27 @@ class ParentalManager:
                 self._orphans.pop(pid, None)
             else:
                 self._orphans[pid] = holder["owned"]
+        self._check_new_devices()
         self._save()
         return changed
+
+    def _check_new_devices(self) -> None:
+        """Alert when a device never seen before joins the network."""
+        devices = (self.coordinator.data or {}).get("devices") or []
+        macs = {str(d.get("mac") or "").lower() for d in devices} - {""}
+        if self._known_macs is None:
+            self._known_macs = macs  # first run: nothing is "new"
+            return
+        for dev in devices:
+            mac = str(dev.get("mac") or "").lower()
+            if mac and mac not in self._known_macs:
+                self._known_macs.add(mac)
+                self._emit(
+                    None,
+                    "new_device",
+                    {"mac": mac, "name": dev.get("name"), "ip": dev.get("ip"),
+                     "link": dev.get("link"), "ssid": dev.get("ssid")},
+                )
 
     def _online(self, mac: str) -> bool:
         device = self.coordinator.device_by_mac(mac)
@@ -452,6 +606,9 @@ class ParentalManager:
             key = "blocked_wifi" if self._scope == "wifi" else "blocked_lan"
             if key in device:
                 device[key] = blocked
+            access = "acces_wifi" if self._scope == "wifi" else "acces_internet"
+            if access in device:
+                device[access] = not blocked
         return True
 
     # -- helpers for the entities ---------------------------------------------

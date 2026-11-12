@@ -114,13 +114,19 @@ create_dashboard:
 
 grant_extra_time:
   name: Grant extra time
-  description: Lifts every parental-control restriction of a profile (schedule and quota) for a while.
+  description: Lifts the parental-control restrictions (schedule and quota) of a profile, or of one of its devices, for a while.
   fields:
     profile:
       name: Profile
       description: Name of the parental-control profile.
       required: true
       example: "Léa"
+      selector:
+        text:
+    device:
+      name: Device
+      description: Name or MAC address of one device of the profile. Leave empty for the whole profile.
+      required: false
       selector:
         text:
     minutes:
@@ -131,4 +137,56 @@ grant_extra_time:
         number:
           min: 0
           max: 720
+          unit_of_measurement: min
+
+add_quota_time:
+  name: Add quota time
+  description: Adds minutes to today's quota of a device (or of every device of the profile that has a quota). The bonus ends at midnight.
+  fields:
+    profile:
+      name: Profile
+      description: Name of the parental-control profile.
+      required: true
+      selector:
+        text:
+    device:
+      name: Device
+      description: Name or MAC address of one device of the profile. Leave empty for the whole profile.
+      required: false
+      selector:
+        text:
+    minutes:
+      name: Minutes
+      description: Minutes to add (default 15).
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 720
+          unit_of_measurement: min
+
+wifi_timer:
+  name: Wi-Fi timer
+  description: Switches a Wi-Fi band on now and off again after a while. The timer survives a restart of Home Assistant. 0 minutes cancels a running timer.
+  fields:
+    band:
+      name: Band
+      description: Which Wi-Fi to switch (the guest network is only available where the box exposes it).
+      required: true
+      default: all
+      selector:
+        select:
+          options:
+            - all
+            - "24"
+            - "5"
+            - guest
+    minutes:
+      name: Minutes
+      description: How long it stays on.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 1440
           unit_of_measurement: min

@@ -20,6 +20,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .bbox_api import BboxAuthError, BboxError
 from .const import (
     CONF_DASHBOARDS,
+    CONF_DEVICE_NAMES,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -72,6 +73,13 @@ class BboxCoordinator(DataUpdateCoordinator):
             # Panne temporaire (session expirée, box injoignable…) : on
             # signale l'indisponibilité sans demander de mot de passe.
             raise UpdateFailed(str(err)) from err
+        # Custom names chosen in the options replace the router's names.
+        aliases = (self.entry.options or {}).get(CONF_DEVICE_NAMES) or {}
+        if aliases:
+            for device in data.get("devices", []):
+                alias = aliases.get(str(device.get("mac", "")).lower())
+                if alias:
+                    device["name"] = alias
         self._vanished = self._compute_vanished(
             {str(d.get("mac", "")).lower() for d in data.get("devices", [])}
         )

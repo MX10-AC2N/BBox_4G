@@ -16,6 +16,7 @@ from .const import (
     BLOCK_SCOPES,
     CONF_BLOCK_SCOPE,
     CONF_DASHBOARDS,
+    CONF_DEVICE_NAMES,
     CONF_DEVICE_MODE,
     CONF_FAMILY,
     CONF_HOST,
@@ -184,16 +185,69 @@ class BboxOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self) -> None:
         self._edit_id: str | None = None
+        self._name_mac: str | None = None
 
     # -- menu ---------------------------------------------------------------
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        menu = ["settings", "parental_add"]
+        menu = ["settings", "device_names", "parental_add"]
         if self._profiles():
             menu += ["parental_edit", "parental_remove"]
         return self.async_show_menu(step_id="init", menu_options=menu)
+
+    # -- custom device names -----------------------------------------------
+
+    def _known_devices(self) -> dict[str, str]:
+        """``{mac: label}`` of every device the router knows (with its alias)."""
+        coordinator = (
+            self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id) or {}
+        ).get("coordinator")
+        names = (self.config_entry.options or {}).get(CONF_DEVICE_NAMES) or {}
+        out: dict[str, str] = {}
+        for dev in (coordinator.devices if coordinator else []):
+            mac = str(dev.get("mac") or "").lower()
+            if mac:
+                out[mac] = f"{dev.get('name') or mac} ({mac[-5:]})"
+        for mac, alias in names.items():
+            out.setdefault(mac, f"{alias} ({mac[-5:]})")
+        return dict(sorted(out.items(), key=lambda kv: kv[1].lower()))
+
+    async def async_step_device_names(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        devices = self._known_devices()
+        if user_input is not None:
+            self._name_mac = user_input["device"]
+            return await self.async_step_device_names_form()
+        if not devices:
+            return await self.async_step_init()
+        return self.async_show_form(
+            step_id="device_names",
+            data_schema=vol.Schema({vol.Required("device"): vol.In(devices)}),
+        )
+
+    async def async_step_device_names_form(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        mac = self._name_mac or ""
+        names = dict((self.config_entry.options or {}).get(CONF_DEVICE_NAMES) or {})
+        if user_input is not None:
+            name = str(user_input.get("name") or "").strip()
+            if name:
+                names[mac] = name
+            else:
+                names.pop(mac, None)  # empty name = back to the router's name
+            options = {**(self.config_entry.options or {}), CONF_DEVICE_NAMES: names}
+            return self.async_create_entry(title="", data=options)
+        return self.async_show_form(
+            step_id="device_names_form",
+            data_schema=vol.Schema(
+                {vol.Optional("name", default=names.get(mac, "")): str}
+            ),
+            description_placeholders={"device": self._known_devices().get(mac, mac)},
+        )
 
     # -- parental control profiles -----------------------------------------
 

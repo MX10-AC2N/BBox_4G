@@ -46,7 +46,9 @@ from .const import (
     PLATFORMS,
     SERVICE_BLOCK_DEVICE,
     SERVICE_CREATE_DASHBOARD,
+    SERVICE_ADD_QUOTA_TIME,
     SERVICE_GRANT_EXTRA_TIME,
+    SERVICE_WIFI_TIMER,
     SERVICE_REFRESH,
     SERVICE_SET_INTERNET,
     SERVICE_SET_WIFI,
@@ -56,7 +58,8 @@ from .const import (
 )
 from .coordinator import BboxCoordinator
 from .dashboard import async_setup_selected_dashboards
-from .parental import OVERRIDE_MINUTES, QUOTA_MAX, ParentalManager
+from .parental import BONUS_MINUTES, OVERRIDE_MINUTES, QUOTA_MAX, ParentalManager
+from .wifi_timer import BANDS, WifiTimers
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,9 +82,25 @@ ACCESS_SCHEMA = vol.Schema(
 GRANT_SCHEMA = vol.Schema(
     {
         vol.Required("profile"): cv.string,
+        vol.Optional("device"): cv.string,
         vol.Optional("minutes", default=OVERRIDE_MINUTES): vol.All(
             vol.Coerce(int), vol.Range(min=0, max=QUOTA_MAX)
         ),
+    }
+)
+ADD_QUOTA_SCHEMA = vol.Schema(
+    {
+        vol.Required("profile"): cv.string,
+        vol.Optional("device"): cv.string,
+        vol.Optional("minutes", default=BONUS_MINUTES): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=QUOTA_MAX)
+        ),
+    }
+)
+WIFI_TIMER_SCHEMA = vol.Schema(
+    {
+        vol.Required("band"): vol.In(BANDS),
+        vol.Required("minutes"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
     }
 )
 CREATE_DASHBOARD_SCHEMA = vol.Schema(
@@ -135,13 +154,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     parental = ParentalManager(hass, entry, coordinator)
+    timers = WifiTimers(hass, entry, coordinator)
     hass.data[DOMAIN][entry.entry_id] = {
         "coordinator": coordinator,
         "client": client,
         "parental": parental,
+        "wifi_timers": timers,
     }
 
     await parental.async_start()
+    await timers.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
@@ -165,6 +187,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     parental = (hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}).get("parental")
     if parental:
         await parental.async_stop()
+    timers = (hass.data.get(DOMAIN, {}).get(entry.entry_id) or {}).get("wifi_timers")
+    if timers:
+        await timers.async_stop()
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
@@ -291,20 +316,54 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 "No dashboard could be created. Check the logs for details."
             )
 
-    async def _grant(call: ServiceCall) -> None:
-        """Restore the access of a parental-control profile for a while."""
+    def _find(call: ServiceCall) -> tuple[Any, dict[str, Any], str | None]:
+        """Manager, profile and (optional) device MAC designated by a call."""
         ref = call.data["profile"]
         for data in hass.data.get(DOMAIN, {}).values():
             manager = data.get("parental")
             profile = manager.profile(ref) if manager else None
-            if profile:
-                await manager.async_grant(profile["id"], call.data["minutes"])
-                return
+            if not profile:
+                continue
+            wanted = (call.data.get("device") or "").strip().lower()
+            if not wanted:
+                return manager, profile, None
+            for mac in profile["macs"]:
+                if wanted in (mac, manager.device_label(mac).lower()):
+                    return manager, profile, mac
+            raise HomeAssistantError(
+                f"Device {call.data['device']!r} is not in the profile {profile['name']!r}"
+            )
         raise HomeAssistantError(f"Unknown parental-control profile: {ref}")
+
+    async def _grant(call: ServiceCall) -> None:
+        """Restore the access of a profile (or of one of its devices) for a while."""
+        manager, profile, mac = _find(call)
+        await manager.async_grant(profile["id"], call.data["minutes"], mac)
+
+    async def _add_quota(call: ServiceCall) -> None:
+        """Add minutes to today's quota."""
+        manager, profile, mac = _find(call)
+        if not await manager.async_add_bonus(profile["id"], call.data["minutes"], mac):
+            raise HomeAssistantError("No device with a quota to extend (quota 0 = unlimited).")
+
+    async def _wifi_timer(call: ServiceCall) -> None:
+        """Switch a Wi-Fi band on and off again after a while."""
+        for data in hass.data.get(DOMAIN, {}).values():
+            timers = data.get("wifi_timers")
+            if timers:
+                await timers.async_set(call.data["band"], call.data["minutes"])
+                return
+        raise HomeAssistantError("No Bbox configured.")
 
     hass.services.async_register(DOMAIN, SERVICE_REFRESH, _refresh)
     hass.services.async_register(
         DOMAIN, SERVICE_GRANT_EXTRA_TIME, _grant, schema=GRANT_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_ADD_QUOTA_TIME, _add_quota, schema=ADD_QUOTA_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_WIFI_TIMER, _wifi_timer, schema=WIFI_TIMER_SCHEMA
     )
     hass.services.async_register(DOMAIN, SERVICE_WAKE_DEVICE, _wake)
     hass.services.async_register(DOMAIN, SERVICE_SET_INTERNET, _set_internet)
