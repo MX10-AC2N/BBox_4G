@@ -40,7 +40,8 @@
           "settings": "Réglages généraux",
           "parental_add": "Contrôle parental : ajouter un profil",
           "parental_edit": "Contrôle parental : modifier un profil",
-          "parental_remove": "Contrôle parental : supprimer un profil"
+          "parental_remove": "Contrôle parental : supprimer un profil",
+          "device_names": "Renommer des appareils"
         }
       },
       "settings": {
@@ -79,6 +80,20 @@
         "description": "Les appareils bloqués par ce profil sont libérés.",
         "data": {
           "profile": "Profil"
+        }
+      },
+      "device_names": {
+        "title": "Renommer un appareil",
+        "description": "Choisissez l'appareil à renommer. Le nom remplace celui de la box partout (entités, tableaux de bord, alertes).",
+        "data": {
+          "device": "Appareil"
+        }
+      },
+      "device_names_form": {
+        "title": "Nom de l'appareil",
+        "description": "{device}\\n\\nLaissez vide pour revenir au nom de la box.",
+        "data": {
+          "name": "Nom"
         }
       }
     },
@@ -167,7 +182,7 @@
     },
     "grant_extra_time": {
       "name": "Accorder du temps",
-      "description": "Lève toutes les restrictions de contrôle parental d'un profil (plages et quota) pour un moment.",
+      "description": "Lève les restrictions de contrôle parental (plages et quota) d'un profil, ou d'un de ses appareils, pour un moment.",
       "fields": {
         "profile": {
           "name": "Profil",
@@ -176,6 +191,42 @@
         "minutes": {
           "name": "Minutes",
           "description": "Durée de la dérogation (60 par défaut). 0 annule une dérogation en cours."
+        },
+        "device": {
+          "name": "Appareil",
+          "description": "Nom ou adresse MAC d'un appareil du profil. Vide = tout le profil."
+        }
+      }
+    },
+    "add_quota_time": {
+      "name": "Ajouter du temps de quota",
+      "description": "Ajoute des minutes au quota du jour d'un appareil (ou de tous les appareils du profil qui ont un quota). Le bonus se termine à minuit.",
+      "fields": {
+        "profile": {
+          "name": "Profil",
+          "description": "Nom du profil de contrôle parental."
+        },
+        "device": {
+          "name": "Appareil",
+          "description": "Nom ou adresse MAC d'un appareil du profil. Vide = tout le profil."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Minutes à ajouter (15 par défaut)."
+        }
+      }
+    },
+    "wifi_timer": {
+      "name": "Minuteur Wi-Fi",
+      "description": "Allume une bande Wi-Fi maintenant et l'éteint après un délai. Le minuteur survit à un redémarrage de Home Assistant. 0 minute annule un minuteur en cours.",
+      "fields": {
+        "band": {
+          "name": "Bande",
+          "description": "Quel Wi-Fi commander (le réseau invité n'est disponible que si la box l'expose)."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Durée d'allumage."
         }
       }
     }
