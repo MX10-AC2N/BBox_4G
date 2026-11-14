@@ -190,6 +190,10 @@ python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' diag
 python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' host-table
 ```
 
+## Tests
+
+L'intégration est vérifiée automatiquement à chaque envoi par 18 tests (vrai Home Assistant, routeur simulé). Le résultat lisible est ici : **[Rapport de tests](docs/TEST_REPORT_french.md)** — ce qui est vérifié, ce qui a réussi, et ce qui n'est *pas* couvert. Il est mis à jour par GitHub Actions ; vous pouvez aussi lancer les tests vous-même avec `pip install -r requirements_test.txt && pytest`.
+
 ## Crédits et genèse du projet
 
 Cette intégration a été écrite **avec l'aide d'assistants IA**, sous la direction de son auteur, **MX10-AC2N**, qui a fixé les objectifs, l'a utilisée sur son propre routeur et son Home Assistant, et a décidé de ce qui était conservé :

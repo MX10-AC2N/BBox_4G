@@ -192,6 +192,10 @@ python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' diag
 python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' host-table
 ```
 
+## Tests
+
+The integration is checked automatically on every push by 18 tests (real Home Assistant, simulated router). The human-readable result is here: **[Test report](docs/TEST_REPORT.md)** — what is checked, what passed, and what is *not* covered. It is updated by GitHub Actions; you can also run the tests yourself with `pip install -r requirements_test.txt && pytest`.
+
 ## Credits and how it was made
 
 This integration was written **with the help of AI assistants**, under the direction of its author, **MX10-AC2N**, who set the goals, ran it on his own router and Home Assistant, and decided what to keep:
