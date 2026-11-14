@@ -192,6 +192,20 @@ python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' diag
 python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' host-table
 ```
 
+## Credits and how it was made
+
+This integration was written **with the help of AI assistants**, under the direction of its author, **MX10-AC2N**, who set the goals, ran it on his own router and Home Assistant, and decided what to keep:
+
+- **MiniMax** — first versions of the integration and of the router client.
+- **Claude** (Anthropic) — code reviews and bug fixes of the router client, HACS packaging and repository setup, the English and French documentation, the dashboards, the parental control (profiles, bedtime windows, quotas, alerts), the Wi-Fi timer, device renaming and the automated tests.
+- **Grok** — an early dashboard proposal, reviewed and then replaced by the current dashboard code.
+
+What this means for you:
+
+- Behaviour on real hardware has only been checked on a **Huawei B528s** (the author's router). Sagemcom Bbox support is not validated.
+- The **parental control** (v2.2 and later) is recent. It is covered by automated tests that run against a **simulated router** (`tests/`, run on every push), not yet by long real-world use.
+- AI-written code can contain mistakes: please [open an issue](https://github.com/MX10-AC2N/BBox_4G/issues) if something misbehaves.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Not affiliated with Bouygues Telecom.

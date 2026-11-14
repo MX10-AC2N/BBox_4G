@@ -190,6 +190,20 @@ python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' diag
 python3 tools/bbox_cli.py --host 192.168.8.1 --password '***' host-table
 ```
 
+## Crédits et genèse du projet
+
+Cette intégration a été écrite **avec l'aide d'assistants IA**, sous la direction de son auteur, **MX10-AC2N**, qui a fixé les objectifs, l'a utilisée sur son propre routeur et son Home Assistant, et a décidé de ce qui était conservé :
+
+- **MiniMax** — premières versions de l'intégration et du client de la box.
+- **Claude** (Anthropic) — relectures et corrections du client de la box, packaging HACS et mise en place du dépôt, documentation française et anglaise, tableaux de bord, contrôle parental (profils, plages de coupure, quotas, alertes), minuteur Wi-Fi, renommage des appareils et tests automatisés.
+- **Grok** — une première proposition de tableau de bord, relue puis remplacée par le code actuel.
+
+Ce que cela implique pour vous :
+
+- Le comportement sur matériel réel n'a été vérifié qu'avec un **Huawei B528s** (le routeur de l'auteur). Le support des Bbox Sagemcom n'est pas validé.
+- Le **contrôle parental** (v2.2 et suivantes) est récent. Il est couvert par des tests automatiques exécutés sur un **routeur simulé** (`tests/`, lancés à chaque envoi), pas encore par un long usage réel.
+- Du code écrit par des IA peut contenir des erreurs : [ouvrez une issue](https://github.com/MX10-AC2N/BBox_4G/issues) si quelque chose se comporte mal.
+
 ## Licence
 
 MIT — voir [LICENSE](LICENSE). Projet non affilié à Bouygues Telecom.
