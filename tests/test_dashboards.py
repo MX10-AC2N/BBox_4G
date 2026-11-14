@@ -15,6 +15,9 @@ def walk(o):
 
 
 async def test_dashboards(hass, freezer):
+    """The three dashboards (native, auto, Mushroom) contain the parental-control section, only reference entities that really exist, and every template renders in Home Assistant's real template engine.
+    FR: Les trois tableaux de bord (natif, auto, Mushroom) contiennent la section de contrôle parental, ne citent que des entités qui existent, et chaque modèle s'affiche dans le vrai moteur de modèles de Home Assistant.
+    """
     c = FakeClient()
     hass.config.language = "fr"
     entry = await setup(hass, freezer, c, options={"dashboards": []})
@@ -45,6 +48,9 @@ async def test_dashboards(hass, freezer):
 
 
 async def test_sections_are_exclusive_and_texts_render(hass, freezer):
+    """A device that is cut off appears only under "blocked devices", never also under "connected devices"; the texts and counters of the cards render correctly.
+    FR: Un appareil coupé n'apparaît que dans « Appareils bloqués », jamais aussi dans « Appareils connectés » ; les textes et compteurs des cartes s'affichent correctement.
+    """
     hass.config.language = "fr"
     c = FakeClient()
     entry = await setup(hass, freezer, c)
@@ -99,6 +105,9 @@ async def test_sections_are_exclusive_and_texts_render(hass, freezer):
 
 
 async def test_left_table_renders(hass, freezer):
+    """The "time left today" table of each profile renders with one line per device ("Illimité" = unlimited, when there is no quota).
+    FR: Le tableau « Temps restant aujourd'hui » de chaque profil s'affiche avec une ligne par appareil (« Illimité » quand il n'y a pas de quota).
+    """
     hass.config.language = "fr"
     from homeassistant.helpers.template import Template
     await setup(hass, freezer, FakeClient())

@@ -21,6 +21,9 @@ def at(y, m, d, hh, mm):
 
 # 2026-11-09 is a Monday
 async def test_window_overnight_and_kinds():
+    """Bedtime windows: a night crossing midnight (21:00 → 07:00) is cut at the right times; Friday and Saturday nights use the weekend window; equal start and end disables the window; daytime windows work.
+    FR: Plages de coupure : une nuit à cheval sur minuit (21:00 → 07:00) est coupée aux bonnes heures ; les nuits du vendredi et du samedi utilisent la plage week-end ; début = fin désactive la plage ; les plages de journée fonctionnent.
+    """
     cfg = dict(P.DEFAULTS)
     assert P.block_window(cfg, at(2026, 11, 9, 20, 59)) is None
     s, e = P.block_window(cfg, at(2026, 11, 9, 21, 0))
@@ -44,6 +47,9 @@ async def test_window_overnight_and_kinds():
 
 
 async def test_format_helpers():
+    """Time-left texts: 85 minutes show as "1 h 25", 45 as "45 min", no quota as "Illimité" and a used-up quota as "Épuisé".
+    FR: Textes du temps restant : 85 minutes s'affichent « 1 h 25 », 45 « 45 min », sans quota « Illimité », quota épuisé « Épuisé ».
+    """
     assert P.format_minutes(85) == "1 h 25" and P.format_minutes(45) == "45 min" and P.format_minutes(60) == "1 h 00"
     mk = lambda q, u: P.DeviceState(P.FREE, True, None, u, q)
     assert P.remaining_text(mk(0, 5)) == "Illimité"
@@ -52,6 +58,9 @@ async def test_format_helpers():
 
 
 async def test_state_priority_and_quota_kind():
+    """Rule priority: profile off, then override, then bedtime window, then quota; the quota is per device with its own weekend value; an override lifts the quota.
+    FR: Priorité des règles : profil désactivé, puis dérogation, puis plage de coupure, puis quota ; le quota est par appareil avec sa valeur week-end ; une dérogation lève le quota.
+    """
     cfg = dict(P.DEFAULTS, enabled=True)
     dev = dict(P.DEVICE_DEFAULTS, wk_quota=60, we_quota=120, used=3600.0)
     assert P.device_state(cfg, dev, at(2026, 11, 9, 12, 0)).status == P.QUOTA
@@ -134,6 +143,9 @@ def dent(hass, domain, mac, key):
 
 
 async def test_entities_created(hass, freezer):
+    """A profile creates its entities (switch, schedule times, quota numbers, usage sensors, buttons) and starts switched off ("Désactivé").
+    FR: Un profil crée ses entités (interrupteur, heures, quotas, capteurs d'usage, boutons) et démarre désactivé (« Désactivé »).
+    """
     await setup(hass, freezer, FakeClient())
     for dom, key in (("switch", "enabled"), ("sensor", "status"), ("button", "override"),
                      ("time", "wk_start"), ("time", "we_end")):
@@ -146,6 +158,9 @@ async def test_entities_created(hass, freezer):
 
 
 async def test_schedule_override_and_manual_block(hass, freezer):
+    """At bedtime the profile's devices are cut off; "Restore for 1 h" lifts the cut and it applies again afterwards; the devices are released in the morning; a device blocked by hand stays blocked.
+    FR: À l'heure de coupure, les appareils du profil sont coupés ; « Rétablir 1 h » lève la coupure puis elle se réapplique ; les appareils sont libérés le matin ; un appareil bloqué à la main reste bloqué.
+    """
     c = FakeClient()
     await setup(hass, freezer, c)
     await hass.services.async_call("switch", "turn_on", {"entity_id": ent(hass, "switch", "enabled")}, blocking=True)
@@ -173,6 +188,9 @@ async def test_schedule_override_and_manual_block(hass, freezer):
 
 
 async def test_service_grant(hass, freezer):
+    """The grant_extra_time service lifts the restriction for a given time (profile name not case-sensitive), 0 minutes cancels it, and an unknown profile gives an error.
+    FR: Le service grant_extra_time lève la restriction pour une durée donnée (nom du profil insensible à la casse), 0 minute l'annule, et un profil inconnu renvoie une erreur.
+    """
     c = FakeClient()
     await setup(hass, freezer, c)
     await hass.services.async_call("switch", "turn_on", {"entity_id": ent(hass, "switch", "enabled")}, blocking=True)
@@ -189,6 +207,9 @@ async def test_service_grant(hass, freezer):
 
 
 async def test_quota_is_per_device(hass, freezer):
+    """Quota per device: only the phone that has a quota is cut off while the PC without quota carries on; the counter stops when the device is cut; the override lifts the quota; midnight resets everything.
+    FR: Quota par appareil : seul le téléphone qui a un quota est coupé, le PC sans quota continue ; le compteur s'arrête quand l'appareil est coupé ; la dérogation lève le quota ; minuit remet tout à zéro.
+    """
     c = FakeClient()
     await setup(hass, freezer, c)
     # no window; 30 min for the phone only, the PC has no quota
@@ -233,6 +254,9 @@ async def test_quota_is_per_device(hass, freezer):
 
 
 async def test_remove_profile_releases(hass, freezer):
+    """Deleting a profile releases the devices it had blocked, but not those blocked by hand.
+    FR: Supprimer un profil libère les appareils qu'il avait bloqués, mais pas ceux bloqués à la main.
+    """
     c = FakeClient()
     entry = await setup(hass, freezer, c)
     await hass.services.async_call("switch", "turn_on", {"entity_id": ent(hass, "switch", "enabled")}, blocking=True)
@@ -246,6 +270,9 @@ async def test_remove_profile_releases(hass, freezer):
 
 
 async def test_options_flow(hass, freezer):
+    """Options: creating a profile (errors for an empty name or no device), the saved options keep the other settings, a device cannot belong to two profiles, and the general settings step keeps the profiles.
+    FR: Options : création d'un profil (erreurs si nom vide ou aucun appareil), les options enregistrées conservent les autres réglages, un appareil ne peut pas être dans deux profils, et l'étape des réglages généraux conserve les profils.
+    """
     c = FakeClient()
     entry = await setup(hass, freezer, c, profiles=[], options={"scan_interval": 60, "block_scope": "lan"})
     r = await hass.config_entries.options.async_init(entry.entry_id)
@@ -284,6 +311,9 @@ def manager_of(hass, entry):
 
 
 async def test_alerts_bonus_and_device_override(hass, freezer):
+    """Alerts (quota almost over, quota reached, override started) fire once; the +15 min bonus and the add_quota_time service extend today's quota of one device (error for an unlimited device); "Restore for 1 h" works for a single device.
+    FR: Alertes (quota bientôt fini, quota atteint, dérogation démarrée) déclenchées une seule fois ; le bonus +15 min et le service add_quota_time prolongent le quota du jour d'un appareil (erreur pour un appareil illimité) ; « Rétablir 1 h » fonctionne pour un seul appareil.
+    """
     c = FakeClient()
     entry = await setup(hass, freezer, c)
     m = manager_of(hass, entry)
@@ -331,6 +361,9 @@ async def test_alerts_bonus_and_device_override(hass, freezer):
 
 
 async def test_holiday_mode(hass, freezer):
+    """Holiday mode (calculation): the weekend window and the weekend quota apply every day.
+    FR: Mode vacances (calcul) : la plage et le quota du week-end s'appliquent tous les jours.
+    """
     cfg = dict(P.DEFAULTS, enabled=True, holiday=True)
     # Monday 21:30 is a school night normally (21:00): holiday -> weekend window 22:00
     assert P.block_window(cfg, at(2026, 11, 9, 21, 30)) is None
@@ -342,6 +375,9 @@ async def test_holiday_mode(hass, freezer):
 
 
 async def test_holiday_switch_entity(hass, freezer):
+    """Holiday mode switch: with it on, a Monday evening is cut at the weekend time (22:00) and not at the school-night time (21:00).
+    FR: Interrupteur du mode vacances : activé, un lundi soir est coupé à l'heure du week-end (22:00) et non à celle de semaine (21:00).
+    """
     c = FakeClient()
     await setup(hass, freezer, c)
     await hass.services.async_call("switch", "turn_on", {"entity_id": ent(hass, "switch", "enabled")}, blocking=True)
@@ -353,6 +389,9 @@ async def test_holiday_switch_entity(hass, freezer):
 
 
 async def test_new_device_and_statistics(hass, freezer):
+    """A device never seen before triggers one "new device" event (devices already known at start are not reported); the daily usage sensor is set up for long-term statistics.
+    FR: Un appareil jamais vu déclenche un événement « nouvel appareil » une seule fois (les appareils déjà connus au démarrage ne sont pas signalés) ; le capteur d'usage du jour est prévu pour les statistiques à long terme.
+    """
     c = FakeClient()
     entry = await setup(hass, freezer, c)
     m = manager_of(hass, entry)
@@ -377,6 +416,9 @@ async def test_new_device_and_statistics(hass, freezer):
 
 
 async def test_custom_names(hass, freezer):
+    """Renaming a device in the options replaces the router's name everywhere; an empty name restores it.
+    FR: Renommer un appareil dans les options remplace le nom de la box partout ; un nom vide le rétablit.
+    """
     c = FakeClient()
     entry = await setup(hass, freezer, c)
     r = await hass.config_entries.options.async_init(entry.entry_id)
@@ -403,6 +445,9 @@ async def test_custom_names(hass, freezer):
 
 
 async def test_wifi_timer(hass, freezer):
+    """Wi-Fi timer: the band is switched on, switched off after the delay, can be cancelled, and a band the box does not support gives a clear error with no timer left behind.
+    FR: Minuteur Wi-Fi : la bande est allumée, éteinte après le délai, peut être annulée, et une bande non gérée par la box renvoie une erreur claire sans minuteur résiduel.
+    """
     c = FakeClient()
     entry = await setup(hass, freezer, c)
     await hass.services.async_call("bbox_4g", "wifi_timer", {"band": "5", "minutes": 30}, blocking=True)
